@@ -4,7 +4,17 @@ import { setManagedRuntime } from "./runtime.ts"
 
 type ActorRuntime = ManagedRuntime.ManagedRuntime<any, any>
 type AnyDatabaseProvider =
-	Parameters<typeof rivetActor>[0] extends ActorConfigInput<any, any, any, any, any, infer TDatabase, any>
+	Parameters<typeof rivetActor>[0] extends ActorConfigInput<
+		any,
+		any,
+		any,
+		any,
+		any,
+		infer TDatabase,
+		any,
+		any,
+		any
+	>
 		? TDatabase
 		: never
 
@@ -70,12 +80,12 @@ export function actor<
 	TVars,
 	TInput,
 	TDatabase extends AnyDatabaseProvider,
-	TActions extends Actions<TState, TConnParams, TConnState, TVars, TInput, TDatabase>,
+	TActions extends Actions<TState, TConnParams, TConnState, TVars, TInput, TDatabase, any, any>,
 >(
-	input: ActorConfigInput<TState, TConnParams, TConnState, TVars, TInput, TDatabase, TActions> & {
+	input: ActorConfigInput<TState, TConnParams, TConnState, TVars, TInput, TDatabase, any, any, TActions> & {
 		runtime?: ActorRuntime
 	},
-): ActorDefinition<TState, TConnParams, TConnState, TVars, TInput, TDatabase, TActions> {
+): ActorDefinition<TState, TConnParams, TConnState, TVars, TInput, TDatabase, any, any, TActions> {
 	const { runtime, ...config } = input
 	const runtimeAwareConfig = runtime
 		? wrapActorConfigWithRuntime(config as Record<string, unknown>, runtime)
@@ -89,7 +99,9 @@ export function actor<
 			TVars,
 			TInput,
 			TDatabase,
+			any,
+			any,
 			TActions
 		>,
-	) as ActorDefinition<TState, TConnParams, TConnState, TVars, TInput, TDatabase, TActions>
+	) as ActorDefinition<TState, TConnParams, TConnState, TVars, TInput, TDatabase, any, any, TActions>
 }
