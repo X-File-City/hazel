@@ -89,7 +89,7 @@
 		"effect": "catalog:effect",
 		"jose": "^6.1.3",
 		"msw": "^2.7.0",
-		"rivetkit": "2.1.3",
+		"rivetkit": "2.1.6",
 		"tsdown": "^0.20.3",
 		"typescript": "^5.9.3"
 	},

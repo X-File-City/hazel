@@ -1,7 +1,5 @@
 # Today
 
-- rework notification sound system / native notification support
-
 - replace tanstack form with effect based form
 
 # Integrations
@@ -12,8 +10,6 @@
 - Railway
 
 # Bugs
-
-- if github is already connecred to other org figure out how to let double connect
 
 # Later
 
