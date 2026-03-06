@@ -6,7 +6,7 @@ import {
 } from "@hazel/domain"
 import type { Channel, ChannelMember, Message } from "@hazel/domain/models"
 import type { BotId, ChannelId, OrganizationId } from "@hazel/schema"
-import { Config, Effect, Ref, Schema } from "effect"
+import { Config, Effect, Option, Ref, Schema } from "effect"
 
 const DEFAULT_DURABLE_STREAMS_URL = "http://localhost:4437/v1/stream"
 
@@ -37,6 +37,10 @@ export class BotGatewayService extends Effect.Service<BotGatewayService>()("BotG
 		const durableStreamsUrl = yield* Config.string("DURABLE_STREAMS_URL").pipe(
 			Config.withDefault(DEFAULT_DURABLE_STREAMS_URL),
 		)
+		const durableStreamsToken = yield* Config.option(Config.string("DURABLE_STREAMS_TOKEN"))
+		const authHeaders: Record<string, string> = Option.isSome(durableStreamsToken)
+			? { Authorization: `Bearer ${durableStreamsToken.value}` }
+			: {}
 		const ensuredStreamsRef = yield* Ref.make(new Set<string>())
 
 		const ensureStream = Effect.fn("BotGatewayService.ensureStream")(function* (botId: BotId) {
@@ -52,6 +56,7 @@ export class BotGatewayService extends Effect.Service<BotGatewayService>()("BotG
 						method: "PUT",
 						headers: {
 							"Content-Type": "application/json",
+							...authHeaders,
 						},
 					}),
 				catch: (cause) =>
@@ -91,6 +96,7 @@ export class BotGatewayService extends Effect.Service<BotGatewayService>()("BotG
 						method: "POST",
 						headers: {
 							"Content-Type": "application/json",
+							...authHeaders,
 						},
 						body: JSON.stringify(envelope),
 					}),
@@ -257,7 +263,7 @@ export class BotGatewayService extends Effect.Service<BotGatewayService>()("BotG
 			}
 
 			return yield* Effect.tryPromise({
-				try: () => fetch(url.toString(), { method: "GET" }),
+				try: () => fetch(url.toString(), { method: "GET", headers: { ...authHeaders } }),
 				catch: (cause) =>
 					new DurableStreamRequestError({
 						message: `Failed to read durable stream for bot ${botId}`,

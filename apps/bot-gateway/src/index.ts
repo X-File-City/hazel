@@ -47,6 +47,7 @@ class GatewayConfig extends Effect.Service<GatewayConfig>()("GatewayConfig", {
 			durableStreamsUrl: yield* Config.string("DURABLE_STREAMS_URL").pipe(
 				Config.withDefault(DEFAULT_DURABLE_STREAMS_URL),
 			),
+			durableStreamsToken: yield* Config.option(Config.string("DURABLE_STREAMS_TOKEN")),
 			heartbeatIntervalMs: yield* Config.integer("GATEWAY_HEARTBEAT_INTERVAL_MS").pipe(
 				Config.withDefault(DEFAULT_HEARTBEAT_INTERVAL_MS),
 			),
@@ -101,6 +102,9 @@ class DurableStreamClient extends Effect.Service<DurableStreamClient>()("Durable
 	effect: Effect.gen(function* () {
 		const config = yield* GatewayConfig
 		const ensuredStreamsRef = yield* Ref.make(new Set<string>())
+		const authHeaders: Record<string, string> = Option.isSome(config.durableStreamsToken)
+			? { Authorization: `Bearer ${config.durableStreamsToken.value}` }
+			: {}
 
 		const ensureStream = Effect.fn("BotGateway.ensureStream")(function* (botId: BotId) {
 			const ensured = yield* Ref.get(ensuredStreamsRef)
@@ -112,7 +116,7 @@ class DurableStreamClient extends Effect.Service<DurableStreamClient>()("Durable
 				try: () =>
 					fetch(buildStreamPath(config.durableStreamsUrl, botId), {
 						method: "PUT",
-						headers: { "Content-Type": "application/json" },
+						headers: { "Content-Type": "application/json", ...authHeaders },
 					}),
 				catch: (cause) =>
 					new DurableStreamGatewayError({
@@ -149,7 +153,7 @@ class DurableStreamClient extends Effect.Service<DurableStreamClient>()("Durable
 				try: () =>
 					fetch(url, {
 						method: "GET",
-						headers: { Accept: "application/json" },
+						headers: { Accept: "application/json", ...authHeaders },
 					}),
 				catch: (cause) =>
 					new DurableStreamGatewayError({
