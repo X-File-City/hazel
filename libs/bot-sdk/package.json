@@ -7,64 +7,40 @@
 		"chat",
 		"effect",
 		"effect-ts",
-		"electric-sql",
 		"hazel",
 		"sdk"
 	],
 	"files": [
 		"dist",
+		"src",
 		"README.md"
 	],
 	"type": "module",
-	"main": "./dist/index.mjs",
-	"types": "./dist/index.d.mts",
+	"main": "./src/index.ts",
+	"types": "./src/index.ts",
 	"exports": {
 		".": {
 			"import": {
-				"types": "./dist/index.d.mts",
-				"default": "./dist/index.mjs"
-			}
-		},
-		"./bot-client": {
-			"import": {
-				"types": "./dist/bot-client.d.mts",
-				"default": "./dist/bot-client.mjs"
+				"types": "./src/index.ts",
+				"default": "./src/index.ts"
 			}
 		},
 		"./config": {
 			"import": {
-				"types": "./dist/config.d.mts",
-				"default": "./dist/config.mjs"
+				"types": "./src/config.ts",
+				"default": "./src/config.ts"
 			}
 		},
 		"./auth": {
 			"import": {
-				"types": "./dist/auth.d.mts",
-				"default": "./dist/auth.mjs"
-			}
-		},
-		"./types": {
-			"import": {
-				"types": "./dist/types/index.d.mts",
-				"default": "./dist/types/index.mjs"
+				"types": "./src/auth.ts",
+				"default": "./src/auth.ts"
 			}
 		},
 		"./errors": {
 			"import": {
-				"types": "./dist/errors.d.mts",
-				"default": "./dist/errors.mjs"
-			}
-		},
-		"./services": {
-			"import": {
-				"types": "./dist/services/index.d.mts",
-				"default": "./dist/services/index.mjs"
-			}
-		},
-		"./layers": {
-			"import": {
-				"types": "./dist/layers.d.mts",
-				"default": "./dist/layers.mjs"
+				"types": "./src/errors.ts",
+				"default": "./src/errors.ts"
 			}
 		}
 	},
@@ -74,13 +50,11 @@
 		"prepublishOnly": "GENERATE_DTS=1 bun run build"
 	},
 	"devDependencies": {
-		"@effect/experimental": "catalog:effect",
 		"@effect/language-service": "catalog:effect",
 		"@effect/opentelemetry": "catalog:effect",
 		"@effect/platform": "catalog:effect",
 		"@effect/platform-bun": "catalog:effect",
 		"@effect/rpc": "catalog:effect",
-		"@electric-sql/client": "1.5.10",
 		"@hazel/actors": "workspace:*",
 		"@hazel/domain": "workspace:*",
 		"@hazel/effect-bun": "workspace:*",
@@ -94,13 +68,11 @@
 		"typescript": "^5.9.3"
 	},
 	"peerDependencies": {
-		"@effect/experimental": ">=0.58.0",
 		"@effect/opentelemetry": ">=0.61.0",
 		"@effect/platform": ">=0.94.0",
 		"@effect/platform-bun": ">=0.87.0",
 		"@effect/rpc": ">=0.73.0",
 		"@effect/workflow": ">=0.16.0",
-		"@electric-sql/client": ">=1.5.0",
 		"effect": ">=3.19.0",
 		"jose": ">=6.0.0",
 		"rivetkit": ">=2.0.0"

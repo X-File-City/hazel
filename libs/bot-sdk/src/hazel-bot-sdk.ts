@@ -1,13 +1,14 @@
 /**
  * Hazel Bot SDK - Convenience layer for Hazel chat app integrations
  *
- * This module provides a simplified, Hazel-specific API on top of the generic bot-sdk.
- * All Hazel domain schemas are pre-configured, making it trivial to build integrations.
+ * This module provides a simplified, Hazel-specific API on top of the websocket gateway runtime.
+ * Hazel message, channel, membership, and command events are pre-configured.
  */
 
 import { FetchHttpClient, HttpApiClient } from "@effect/platform"
 import type {
 	AttachmentId,
+	BotId,
 	ChannelId,
 	ChannelMemberId,
 	MessageId,
@@ -15,6 +16,18 @@ import type {
 	TypingIndicatorId,
 	UserId,
 } from "@hazel/schema"
+import {
+	BotGatewayAckFrame,
+	BotGatewayClientFrame,
+	BotGatewayDispatchFrame,
+	BotGatewayEnvelope,
+	BotGatewayHeartbeatFrame,
+	BotGatewayHelloFrame,
+	BotGatewayInvalidSessionFrame,
+	BotGatewayReadyFrame,
+	BotGatewayReconnectFrame,
+	BotGatewayServerFrame,
+} from "@hazel/domain"
 import type { IntegrationConnection } from "@hazel/domain/models"
 import { HazelApi } from "@hazel/domain/http"
 import { Channel, ChannelMember, Message } from "@hazel/domain/models"
@@ -32,12 +45,12 @@ import {
 	RateLimiter,
 	Redacted,
 	Ref,
+	Runtime,
 	Schema,
 } from "effect"
 import { BotAuth, createAuthContextFromToken } from "./auth.ts"
 import { createLoggerLayer, logLevelFromString, type BotLogConfig, type LogFormat } from "./log-config.ts"
 import { createCommandLogContext, withLogContext, type BotIdentity } from "./log-context.ts"
-import { createBotClientTag } from "./bot-client.ts"
 import {
 	CommandGroup,
 	EmptyCommandGroup,
@@ -50,6 +63,9 @@ import {
 	CommandHandlerError,
 	CommandSyncError,
 	EventHandlerError,
+	GatewayDecodeError,
+	GatewayReadError,
+	GatewaySessionStoreError,
 	MentionableSyncError,
 	MessageDeleteError,
 	MessageListError,
@@ -58,16 +74,15 @@ import {
 	MessageSendError,
 	MessageUpdateError,
 } from "./errors.ts"
-import { BotRpcClient, BotRpcClientConfigTag, BotRpcClientLive } from "./rpc/client.ts"
-import type { EventQueueConfig } from "./services/index.ts"
 import {
-	SseCommandListener,
-	SseCommandListenerLive,
-	ElectricEventQueue,
-	EventDispatcher,
-	ShapeStreamSubscriber,
-	BotHealthServerLive,
-} from "./services/index.ts"
+	BotStateStoreTag,
+	InMemoryBotStateStoreLive,
+	InMemoryGatewaySessionStoreLive,
+	GatewaySessionStoreTag,
+	createGatewayWebSocketUrl,
+} from "./gateway.ts"
+import { BotRpcClient, BotRpcClientConfigTag, BotRpcClientLive } from "./rpc/client.ts"
+import { BotHealthServerLive } from "./services/health-server.ts"
 import { createActorsClient } from "@hazel/actors/client"
 import {
 	BotNotConfiguredError,
@@ -79,7 +94,6 @@ import {
 	type CreateStreamOptions,
 	type MessageUpdateFn,
 } from "./streaming/index.ts"
-import { extractTablesFromEventTypes } from "./types/events.ts"
 
 const DEFAULT_ACTORS_ENDPOINT =
 	"https://hazel-d9c8-production-e8b3:pk_UecfBPkebh46hBcaDkKrAWD6ot3SPvDsB4ybSlOVtf3p8z6EKQiyaOWPLkUqUBBT@api.rivet.dev"
@@ -90,38 +104,20 @@ const DEFAULT_ACTORS_ENDPOINT =
  */
 export interface HazelBotRuntimeConfig<Commands extends CommandGroup<any> = CommandGroup<any>> {
 	readonly backendUrl: string
+	readonly gatewayUrl: string
 	readonly botToken: string
 	readonly commands: Commands
 	readonly mentionable: boolean
 	readonly actorsEndpoint: string
+	readonly resumeOffset: string
+	readonly maxConcurrentPartitions: number
+	readonly heartbeatIntervalMs?: number
 }
 
 export class HazelBotRuntimeConfigTag extends Context.Tag("@hazel/bot-sdk/HazelBotRuntimeConfig")<
 	HazelBotRuntimeConfigTag,
 	HazelBotRuntimeConfig
 >() {}
-
-/**
- * Pre-configured Hazel domain subscriptions
- * Includes: messages, channels, channel_members with their schemas
- */
-export const HAZEL_SUBSCRIPTIONS = [
-	{
-		table: "messages",
-		schema: Message.Model.json,
-		startFromNow: true,
-	},
-	{
-		table: "channels",
-		schema: Channel.Model.json,
-		startFromNow: false,
-	},
-	{
-		table: "channel_members",
-		schema: ChannelMember.Model.json,
-		startFromNow: true,
-	},
-] as const
 
 /**
  * Hazel-specific type aliases for convenience
@@ -187,8 +183,7 @@ export interface SendMessageOptions {
 export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotClient", {
 	accessors: true,
 	scoped: Effect.gen(function* () {
-		// Get the typed BotClient for Hazel subscriptions
-		const bot = yield* createBotClientTag<typeof HAZEL_SUBSCRIPTIONS>()
+		const auth = yield* BotAuth
 		// Get the RPC client from context
 		const rpc = yield* BotRpcClient
 		// Get the RPC client config (for HTTP API calls)
@@ -208,7 +203,7 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 			),
 		)
 		// Get auth context (contains botId, botName, userId for message authoring)
-		const authContext = yield* bot.getAuthContext
+		const authContext = yield* auth.getContext.pipe(Effect.orDie)
 
 		// Create bot identity for log context
 		const botIdentity: BotIdentity = {
@@ -225,8 +220,8 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 
 		// Get the runtime config (optional - contains commands to sync)
 		const runtimeConfigOption = yield* Effect.serviceOption(HazelBotRuntimeConfigTag)
-		// Try to get the command listener (optional - only available if commands are configured)
-		const commandListenerOption = yield* Effect.serviceOption(SseCommandListener)
+		const gatewaySessionStore = yield* GatewaySessionStoreTag
+		const botStateStore = yield* BotStateStoreTag
 
 		// Command handler registry - stores handlers keyed by command name
 		// biome-ignore lint/suspicious/noExplicitAny: handlers are typed at registration, stored loosely
@@ -239,6 +234,18 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 		// biome-ignore lint/suspicious/noExplicitAny: handlers are typed at registration, stored loosely
 		type MentionHandlerFn = (message: MessageType) => Effect.Effect<void, any, any>
 		const mentionHandlersRef = yield* Ref.make<Array<MentionHandlerFn>>([])
+		// biome-ignore lint/suspicious/noExplicitAny: event handlers are typed at registration, stored loosely
+		type MessageHandlerFn = (message: MessageType) => Effect.Effect<void, any, any>
+		type ChannelHandlerFn = (channel: ChannelType) => Effect.Effect<void, any, any>
+		type ChannelMemberHandlerFn = (member: ChannelMemberType) => Effect.Effect<void, any, any>
+		const messageHandlersRef = yield* Ref.make<Array<MessageHandlerFn>>([])
+		const messageUpdateHandlersRef = yield* Ref.make<Array<MessageHandlerFn>>([])
+		const messageDeleteHandlersRef = yield* Ref.make<Array<MessageHandlerFn>>([])
+		const channelCreatedHandlersRef = yield* Ref.make<Array<ChannelHandlerFn>>([])
+		const channelUpdatedHandlersRef = yield* Ref.make<Array<ChannelHandlerFn>>([])
+		const channelDeletedHandlersRef = yield* Ref.make<Array<ChannelHandlerFn>>([])
+		const channelMemberAddedHandlersRef = yield* Ref.make<Array<ChannelMemberHandlerFn>>([])
+		const channelMemberRemovedHandlersRef = yield* Ref.make<Array<ChannelMemberHandlerFn>>([])
 
 		// Helper to extract user mentions from content
 		// Mention format: @[userId:USER_ID]
@@ -262,6 +269,457 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 					Effect.withSpan("bot.integration.getEnabled", { attributes: { orgId } }),
 				),
 		})
+
+		const getGatewayRuntimeConfig = () =>
+			Option.match(runtimeConfigOption, {
+				onNone: () => null,
+				onSome: (config) => config,
+			})
+
+		const getBotState = <A>(key: string, schema: Schema.Schema<A>) =>
+			botStateStore.get(authContext.botId as BotId, key).pipe(
+				Effect.flatMap((value) =>
+					value === null
+						? Effect.succeed(null)
+						: Effect.try({
+								try: () => JSON.parse(value) as unknown,
+								catch: (cause) =>
+									new GatewayDecodeError({
+										message: `Failed to parse bot state for key ${key}`,
+										payload: value,
+										cause,
+									}),
+							}).pipe(
+								Effect.flatMap((parsed) =>
+									Schema.decodeUnknown(schema)(parsed).pipe(
+										Effect.mapError(
+											(cause) =>
+												new GatewayDecodeError({
+													message: `Failed to decode bot state for key ${key}`,
+													payload: value,
+													cause,
+												}),
+										),
+									),
+								),
+								Effect.map((decoded) => decoded as A | null),
+							),
+				),
+			)
+
+		const setBotState = <A>(key: string, schema: Schema.Schema<A>, value: A) =>
+			Schema.encode(schema)(value).pipe(
+				Effect.flatMap((encoded) =>
+					botStateStore.set(authContext.botId as BotId, key, JSON.stringify(encoded)),
+				),
+			)
+
+		const mapCommandHandlerError = (commandName: string, cause: unknown): CommandHandlerError =>
+			new CommandHandlerError({
+				message: `Command handler failed for /${commandName}`,
+				commandName,
+				cause,
+			})
+
+		const mapEventHandlerError = (eventType: string, cause: unknown): EventHandlerError =>
+			new EventHandlerError({
+				message: `Gateway handler failed for ${eventType}`,
+				eventType,
+				cause,
+			})
+
+		const runGatewayHandlers = <A>(
+			handlers: ReadonlyArray<(value: A) => Effect.Effect<void, any, any>>,
+			value: A,
+			eventType: string,
+		) =>
+			Effect.forEach(
+				handlers,
+				(handler) =>
+					handler(value).pipe(Effect.mapError((cause) => mapEventHandlerError(eventType, cause))),
+				{ discard: true },
+			)
+
+		const runMentionHandlers = (message: MessageType) =>
+			Effect.gen(function* () {
+				if (!mentionableEnabled) {
+					return
+				}
+
+				const handlers = yield* Ref.get(mentionHandlersRef)
+				if (handlers.length === 0) {
+					return
+				}
+
+				if (message.authorId === authContext.userId) {
+					return
+				}
+
+				const mentions = extractUserMentions(message.content)
+				if (!mentions.includes(authContext.userId)) {
+					return
+				}
+
+				yield* runGatewayHandlers(handlers, message, "message.create")
+			})
+
+		const decodeCommandArgs = (event: Extract<BotGatewayEnvelope, { eventType: "command.invoke" }>) =>
+			Option.match(
+				Option.flatMap(commandGroup, (group) =>
+					Option.fromNullable(
+						group.commands.find((c: CommandDef) => c.name === event.payload.commandName),
+					),
+				),
+				{
+					onNone: () => Effect.succeed(event.payload.arguments),
+					onSome: (def) =>
+						Schema.decodeUnknown(def.argsSchema)(event.payload.arguments).pipe(
+							Effect.mapError(
+								(cause) =>
+									new CommandArgsDecodeError({
+										message: `Failed to decode args for /${event.payload.commandName}`,
+										commandName: event.payload.commandName,
+										cause,
+									}),
+							),
+							Effect.catchTag("CommandArgsDecodeError", (error) =>
+								Effect.logWarning(
+									`Failed to decode args for /${event.payload.commandName}, using raw arguments`,
+									{ error, rawArgs: event.payload.arguments },
+								).pipe(Effect.as(event.payload.arguments)),
+							),
+						),
+				},
+			)
+
+		const dispatchGatewayEvent = (envelope: Schema.Schema.Type<typeof BotGatewayEnvelope>) =>
+			Effect.gen(function* () {
+				switch (envelope.eventType) {
+					case "command.invoke": {
+						const handler = commandHandlers.get(envelope.payload.commandName)
+						if (!handler) {
+							yield* Effect.logWarning(
+								`No handler for command: ${envelope.payload.commandName}`,
+							)
+							return
+						}
+
+						const decodedArgs = yield* decodeCommandArgs(envelope)
+						const ctx: TypedCommandContext<unknown> = {
+							commandName: envelope.payload.commandName,
+							channelId: envelope.payload.channelId,
+							userId: envelope.payload.userId,
+							orgId: envelope.payload.orgId,
+							args: decodedArgs,
+							timestamp: envelope.payload.timestamp,
+						}
+						const logCtx = createCommandLogContext({
+							...botIdentity,
+							commandName: envelope.payload.commandName,
+							channelId: envelope.payload.channelId,
+							userId: envelope.payload.userId,
+							orgId: envelope.payload.orgId,
+						})
+
+						yield* withLogContext(
+							logCtx,
+							"bot.command.handle",
+							handler(ctx).pipe(
+								Effect.mapError((cause) =>
+									mapCommandHandlerError(envelope.payload.commandName, cause),
+								),
+							),
+						)
+						return
+					}
+					case "message.create": {
+						const handlers = yield* Ref.get(messageHandlersRef)
+						yield* runGatewayHandlers(handlers, envelope.payload, envelope.eventType)
+						yield* runMentionHandlers(envelope.payload)
+						return
+					}
+					case "message.update": {
+						const handlers = yield* Ref.get(messageUpdateHandlersRef)
+						yield* runGatewayHandlers(handlers, envelope.payload, envelope.eventType)
+						return
+					}
+					case "message.delete": {
+						const handlers = yield* Ref.get(messageDeleteHandlersRef)
+						yield* runGatewayHandlers(handlers, envelope.payload, envelope.eventType)
+						return
+					}
+					case "channel.create": {
+						const handlers = yield* Ref.get(channelCreatedHandlersRef)
+						yield* runGatewayHandlers(handlers, envelope.payload, envelope.eventType)
+						return
+					}
+					case "channel.update": {
+						const handlers = yield* Ref.get(channelUpdatedHandlersRef)
+						yield* runGatewayHandlers(handlers, envelope.payload, envelope.eventType)
+						return
+					}
+					case "channel.delete": {
+						const handlers = yield* Ref.get(channelDeletedHandlersRef)
+						yield* runGatewayHandlers(handlers, envelope.payload, envelope.eventType)
+						return
+					}
+					case "channel_member.add": {
+						const handlers = yield* Ref.get(channelMemberAddedHandlersRef)
+						yield* runGatewayHandlers(handlers, envelope.payload, envelope.eventType)
+						return
+					}
+					case "channel_member.remove": {
+						const handlers = yield* Ref.get(channelMemberRemovedHandlersRef)
+						yield* runGatewayHandlers(handlers, envelope.payload, envelope.eventType)
+						return
+					}
+				}
+			})
+
+		const processGatewayBatch = (
+			envelopes: ReadonlyArray<Schema.Schema.Type<typeof BotGatewayEnvelope>>,
+		) =>
+			Effect.gen(function* () {
+				const partitions = new Map<string, Array<Schema.Schema.Type<typeof BotGatewayEnvelope>>>()
+				for (const envelope of envelopes) {
+					const existing = partitions.get(envelope.partitionKey)
+					if (existing) {
+						existing.push(envelope)
+					} else {
+						partitions.set(envelope.partitionKey, [envelope])
+					}
+				}
+
+				yield* Effect.forEach(
+					Array.from(partitions.values()),
+					(partitionEvents) =>
+						Effect.forEach(partitionEvents, (envelope) => dispatchGatewayEvent(envelope), {
+							discard: true,
+						}),
+					{
+						concurrency: getGatewayRuntimeConfig()?.maxConcurrentPartitions ?? 8,
+						discard: true,
+					},
+				)
+			})
+
+		const loadResumeOffset = (runtimeConfig: HazelBotRuntimeConfig) =>
+			gatewaySessionStore.load(authContext.botId as BotId).pipe(
+				Effect.catchTag("GatewaySessionStoreError", (error) =>
+					Effect.logWarning("Failed to load saved gateway offset, using configured default", {
+						error,
+						botId: authContext.botId,
+					}).pipe(Effect.as(null)),
+				),
+				Effect.map((storedOffset) => storedOffset ?? runtimeConfig.resumeOffset),
+			)
+
+		const normalizeSocketPayload = (payload: unknown): string => {
+			if (typeof payload === "string") {
+				return payload
+			}
+			if (payload instanceof ArrayBuffer) {
+				return new TextDecoder().decode(new Uint8Array(payload))
+			}
+			if (ArrayBuffer.isView(payload)) {
+				return new TextDecoder().decode(
+					new Uint8Array(payload.buffer, payload.byteOffset, payload.byteLength),
+				)
+			}
+			return String(payload)
+		}
+
+		const encodeGatewayFrame = (frame: BotGatewayClientFrame): string => JSON.stringify(frame)
+
+		const startWebSocketGatewayLoop = (runtimeConfig: HazelBotRuntimeConfig) =>
+			Effect.gen(function* () {
+				const runtime = yield* Effect.runtime<any>()
+				let nextResumeOffset = yield* loadResumeOffset(runtimeConfig)
+				let hasConnected = false
+
+				const connectOnce = Effect.tryPromise({
+					try: () =>
+						new Promise<string>((resolve, reject) => {
+							const socket = new WebSocket(
+								createGatewayWebSocketUrl(runtimeConfig.gatewayUrl).toString(),
+							)
+							let finished = false
+							let sessionId: string | null = null
+							let currentResumeOffset = nextResumeOffset
+							let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+
+							const finish = (resumeOffset: string, error?: unknown) => {
+								if (finished) {
+									return
+								}
+								finished = true
+								if (heartbeatTimer) {
+									clearInterval(heartbeatTimer)
+								}
+								if (error) {
+									reject(error)
+									return
+								}
+								resolve(resumeOffset)
+							}
+
+							const sendFrame = (frame: BotGatewayClientFrame) => {
+								if (socket.readyState === WebSocket.OPEN) {
+									socket.send(encodeGatewayFrame(frame))
+								}
+							}
+
+							const startHeartbeat = (
+								hello: Schema.Schema.Type<typeof BotGatewayHelloFrame>,
+							) => {
+								const intervalMs =
+									runtimeConfig.heartbeatIntervalMs ?? hello.heartbeatIntervalMs
+								if (heartbeatTimer) {
+									clearInterval(heartbeatTimer)
+								}
+								heartbeatTimer = setInterval(() => {
+									sendFrame({
+										op: "HEARTBEAT",
+										sessionId: sessionId ?? undefined,
+									} satisfies Schema.Schema.Type<typeof BotGatewayHeartbeatFrame>)
+								}, intervalMs)
+							}
+
+							socket.addEventListener("message", (event) => {
+								const payload = normalizeSocketPayload(event.data)
+								let frame: Schema.Schema.Type<typeof BotGatewayServerFrame>
+								try {
+									frame = Schema.decodeUnknownSync(BotGatewayServerFrame)(
+										JSON.parse(payload),
+									)
+								} catch (error) {
+									socket.close(1011, "invalid_gateway_frame")
+									finish(currentResumeOffset, error)
+									return
+								}
+
+								switch (frame.op) {
+									case "HELLO": {
+										startHeartbeat(frame)
+										sendFrame({
+											op: "IDENTIFY",
+											botToken: runtimeConfig.botToken,
+											resumeOffset: currentResumeOffset,
+										})
+										return
+									}
+									case "READY": {
+										sessionId = frame.sessionId
+										Runtime.runPromise(runtime)(
+											Effect.logInfo(
+												hasConnected || frame.resumed
+													? "Bot gateway websocket reconnected"
+													: "Bot gateway websocket connected",
+												{
+													botId: authContext.botId,
+													sessionId: frame.sessionId,
+													resumed: frame.resumed,
+													offset: currentResumeOffset,
+												},
+											),
+										).catch(() => undefined)
+										hasConnected = true
+										return
+									}
+									case "DISPATCH": {
+										Runtime.runPromise(runtime)(
+											Effect.gen(function* () {
+												yield* processGatewayBatch(frame.events)
+												yield* gatewaySessionStore.save(
+													authContext.botId as BotId,
+													frame.nextOffset,
+												)
+											}),
+										)
+											.then(() => {
+												currentResumeOffset = frame.nextOffset
+												sendFrame({
+													op: "ACK",
+													sessionId: frame.sessionId,
+													nextOffset: frame.nextOffset,
+												} satisfies Schema.Schema.Type<typeof BotGatewayAckFrame>)
+											})
+											.catch((error) => {
+												socket.close(1011, "dispatch_failed")
+												finish(currentResumeOffset, error)
+											})
+										return
+									}
+									case "HEARTBEAT_ACK": {
+										return
+									}
+									case "RECONNECT": {
+										socket.close(1012, frame.reason)
+										finish(currentResumeOffset)
+										return
+									}
+									case "INVALID_SESSION": {
+										Runtime.runPromise(runtime)(
+											gatewaySessionStore.save(
+												authContext.botId as BotId,
+												runtimeConfig.resumeOffset,
+											),
+										)
+											.catch(() => undefined)
+											.finally(() => {
+												currentResumeOffset = runtimeConfig.resumeOffset
+												socket.close(1008, frame.reason)
+												finish(currentResumeOffset)
+											})
+										return
+									}
+								}
+							})
+
+							socket.addEventListener("error", () => {
+								finish(currentResumeOffset, new Error("Gateway websocket connection failed"))
+							})
+
+							socket.addEventListener("close", () => {
+								finish(currentResumeOffset)
+							})
+						}),
+					catch: (cause) =>
+						new GatewayReadError({
+							message: "Failed to connect to bot gateway websocket",
+							cause,
+						}),
+				})
+
+				yield* Effect.forkScoped(
+					Effect.forever(
+						Effect.gen(function* () {
+							nextResumeOffset = yield* connectOnce.pipe(
+								Effect.catchAll((error) =>
+									Effect.logWarning("Bot gateway websocket failed, retrying", {
+										error,
+										botId: authContext.botId,
+										offset: nextResumeOffset,
+									}).pipe(
+										Effect.zipRight(Effect.sleep(Duration.seconds(1))),
+										Effect.as(nextResumeOffset),
+									),
+								),
+							)
+						}).pipe(Effect.zipRight(Effect.sleep(Duration.millis(250)))),
+					),
+				)
+			})
+
+		const startGatewayLoop = () =>
+			Effect.gen(function* () {
+				const runtimeConfig = getGatewayRuntimeConfig()
+				if (!runtimeConfig) {
+					return
+				}
+
+				yield* startWebSocketGatewayLoop(runtimeConfig)
+			})
 
 		// Get command group from runtime config for schema decoding
 		const commandGroup = Option.map(runtimeConfigOption, (c) => c.commands)
@@ -460,49 +918,70 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 			 * Register a handler for new messages
 			 */
 			onMessage: <E = EventHandlerError, R = never>(handler: MessageHandler<E, R>) =>
-				bot.on("messages.insert", handler),
+				Ref.update(messageHandlersRef, (handlers) => [...handlers, handler as MessageHandlerFn]),
 
 			/**
 			 * Register a handler for message updates
 			 */
 			onMessageUpdate: <E = EventHandlerError, R = never>(handler: MessageHandler<E, R>) =>
-				bot.on("messages.update", handler),
+				Ref.update(messageUpdateHandlersRef, (handlers) => [
+					...handlers,
+					handler as MessageHandlerFn,
+				]),
 
 			/**
 			 * Register a handler for message deletes
 			 */
 			onMessageDelete: <E = EventHandlerError, R = never>(handler: MessageHandler<E, R>) =>
-				bot.on("messages.delete", handler),
+				Ref.update(messageDeleteHandlersRef, (handlers) => [
+					...handlers,
+					handler as MessageHandlerFn,
+				]),
 
 			/**
 			 * Register a handler for new channels
 			 */
 			onChannelCreated: <E = EventHandlerError, R = never>(handler: ChannelHandler<E, R>) =>
-				bot.on("channels.insert", handler),
+				Ref.update(channelCreatedHandlersRef, (handlers) => [
+					...handlers,
+					handler as ChannelHandlerFn,
+				]),
 
 			/**
 			 * Register a handler for channel updates
 			 */
 			onChannelUpdated: <E = EventHandlerError, R = never>(handler: ChannelHandler<E, R>) =>
-				bot.on("channels.update", handler),
+				Ref.update(channelUpdatedHandlersRef, (handlers) => [
+					...handlers,
+					handler as ChannelHandlerFn,
+				]),
 
 			/**
 			 * Register a handler for channel deletes
 			 */
 			onChannelDeleted: <E = EventHandlerError, R = never>(handler: ChannelHandler<E, R>) =>
-				bot.on("channels.delete", handler),
+				Ref.update(channelDeletedHandlersRef, (handlers) => [
+					...handlers,
+					handler as ChannelHandlerFn,
+				]),
 
 			/**
 			 * Register a handler for new channel members
 			 */
 			onChannelMemberAdded: <E = EventHandlerError, R = never>(handler: ChannelMemberHandler<E, R>) =>
-				bot.on("channel_members.insert", handler),
+				Ref.update(channelMemberAddedHandlersRef, (handlers) => [
+					...handlers,
+					handler as ChannelMemberHandlerFn,
+				]),
 
 			/**
 			 * Register a handler for removed channel members
 			 */
 			onChannelMemberRemoved: <E = EventHandlerError, R = never>(handler: ChannelMemberHandler<E, R>) =>
-				bot.on("channel_members.delete", handler),
+				Ref.update(channelMemberRemovedHandlersRef, (handlers) => [
+					...handlers,
+					handler as ChannelMemberHandlerFn,
+				]),
 
 			/**
 			 * Register a handler for when the bot is @mentioned in a message.
@@ -992,7 +1471,7 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 
 			/**
 			 * Start the bot client
-			 * Syncs commands and mentionable flag with backend and begins listening to events (Electric + Redis commands)
+			 * Syncs commands and mentionable flag with backend and begins consuming the durable bot gateway
 			 */
 			start: Effect.gen(function* () {
 				yield* Effect.logDebug("Starting bot client...")
@@ -1003,163 +1482,7 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 				// Sync mentionable flag with backend
 				yield* syncMentionable
 
-				// Set up mention handling if enabled
-				if (mentionableEnabled) {
-					const mentionHandlers = yield* Ref.get(mentionHandlersRef)
-					if (mentionHandlers.length > 0) {
-						yield* bot.on("messages.insert", (message) =>
-							Effect.gen(function* () {
-								yield* Effect.logDebug("[mention-pipeline] Received message", {
-									messageId: message.id,
-									authorId: message.authorId,
-									channelId: message.channelId,
-								})
-
-								// Skip own messages
-								if (message.authorId === authContext.userId) {
-									yield* Effect.logDebug("[mention-pipeline] Skipping own message", {
-										messageId: message.id,
-									})
-									return
-								}
-
-								// Check for bot mention in message content
-								const mentions = extractUserMentions(message.content)
-								if (!mentions.includes(authContext.userId)) {
-									yield* Effect.logDebug("[mention-pipeline] No bot mention found", {
-										messageId: message.id,
-										mentionsFound: mentions.length,
-									})
-									return
-								}
-
-								yield* Effect.logDebug(`[mention-pipeline] Bot mentioned in message`, {
-									messageId: message.id,
-									channelId: message.channelId,
-									authorId: message.authorId,
-								})
-
-								// Get current handlers (in case new ones were registered)
-								const handlers = yield* Ref.get(mentionHandlersRef)
-
-								// Call all mention handlers
-								yield* Effect.forEach(
-									handlers,
-									(handler) =>
-										handler(message).pipe(
-											Effect.catchAllCause((cause) =>
-												Effect.logError("Mention handler failed", { cause }),
-											),
-										),
-									{ discard: true },
-								)
-							}),
-						)
-
-						yield* Effect.logDebug("[mention-pipeline] Mention handler registered", {
-							handlerCount: mentionHandlers.length,
-							botUserId: authContext.userId,
-						})
-					}
-				}
-
-				// Start Electric event listener
-				yield* bot.start
-
-				// Start Redis command dispatcher (if listener is available)
-				// Note: RedisCommandListener now auto-starts on construction
-				yield* Option.match(commandListenerOption, {
-					onNone: () => Effect.void,
-					onSome: (commandListener) =>
-						Effect.gen(function* () {
-							// Start command dispatcher fiber
-							yield* Effect.forkScoped(
-								Effect.forever(
-									Effect.gen(function* () {
-										const queueItem = yield* commandListener.take
-										const event = queueItem.event
-
-										const handler = commandHandlers.get(event.commandName)
-										if (!handler) {
-											yield* Effect.logWarning(
-												`No handler for command: ${event.commandName}`,
-											)
-											return
-										}
-
-										// Find the command definition to decode args
-										const cmdDef = Option.flatMap(commandGroup, (group) =>
-											Option.fromNullable(
-												group.commands.find(
-													(c: CommandDef) => c.name === event.commandName,
-												),
-											),
-										)
-
-										// Decode args using the command's schema if available
-										// Uses Option.match for cleaner handling
-										const decodedArgs = yield* Option.match(cmdDef, {
-											onNone: () => Effect.succeed(event.arguments),
-											onSome: (def) =>
-												Schema.decodeUnknown(def.argsSchema)(event.arguments).pipe(
-													Effect.mapError(
-														(cause) =>
-															new CommandArgsDecodeError({
-																message: `Failed to decode args for /${event.commandName}`,
-																commandName: event.commandName,
-																cause,
-															}),
-													),
-													Effect.catchTag("CommandArgsDecodeError", (error) =>
-														Effect.logWarning(
-															`Failed to decode args for /${event.commandName}, using raw arguments`,
-															{
-																error,
-																rawArgs: event.arguments,
-															},
-														).pipe(Effect.as(event.arguments)),
-													),
-												),
-										})
-
-										const ctx: TypedCommandContext<unknown> = {
-											commandName: event.commandName,
-											channelId: event.channelId as ChannelId,
-											userId: event.userId as UserId,
-											orgId: event.orgId as OrganizationId,
-											args: decodedArgs,
-											timestamp: event.timestamp,
-										}
-
-										// Create log context for this command invocation
-										const logCtx = createCommandLogContext({
-											...botIdentity,
-											commandName: event.commandName,
-											channelId: event.channelId as ChannelId,
-											userId: event.userId as UserId,
-											orgId: event.orgId as OrganizationId,
-										})
-
-										yield* withLogContext(
-											logCtx,
-											"bot.command.handle",
-											handler(ctx).pipe(
-												Effect.catchAllCause((cause) =>
-													Effect.logError(
-														`Command handler failed for ${event.commandName}`,
-														{ cause },
-													),
-												),
-											),
-											{ parent: queueItem.sourceSpan },
-										)
-									}),
-								),
-							)
-
-							yield* Effect.logDebug("Command dispatcher started")
-						}),
-				})
+				yield* startGatewayLoop()
 
 				yield* Effect.logDebug("Bot client started successfully")
 			}),
@@ -1167,7 +1490,17 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 			/**
 			 * Get bot authentication context
 			 */
-			getAuthContext: bot.getAuthContext,
+			getAuthContext: auth.getContext.pipe(Effect.orDie),
+
+			state: {
+				get: (key: string) => botStateStore.get(authContext.botId as BotId, key),
+				set: (key: string, value: string) =>
+					botStateStore.set(authContext.botId as BotId, key, value),
+				delete: (key: string) => botStateStore.delete(authContext.botId as BotId, key),
+				getJson: <A>(key: string, schema: Schema.Schema<A>) => getBotState(key, schema),
+				setJson: <A>(key: string, schema: Schema.Schema<A>, value: A) =>
+					setBotState(key, schema, value),
+			},
 
 			/**
 			 * Helper to create actors service from runtime config.
@@ -1325,18 +1658,17 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
  */
 export interface HazelBotConfig<Commands extends CommandGroup<any> = EmptyCommands> {
 	/**
-	 * Electric proxy URL
-	 * @default "https://electric.hazel.sh/v1/shape"
-	 * @example "http://localhost:8787/v1/shape" // For local development
-	 */
-	readonly electricUrl?: string
-
-	/**
-	 * Backend URL for RPC API calls and SSE command streaming
+	 * Backend URL for RPC API calls
 	 * @default "https://api.hazel.sh"
 	 * @example "http://localhost:3003" // For local development
 	 */
 	readonly backendUrl?: string
+
+	/**
+	 * Gateway URL for durable bot event delivery.
+	 * Defaults to `backendUrl`.
+	 */
+	readonly gatewayUrl?: string
 
 	/**
 	 * Actors/Rivet endpoint for live state streaming
@@ -1374,14 +1706,35 @@ export interface HazelBotConfig<Commands extends CommandGroup<any> = EmptyComman
 	readonly mentionable?: boolean
 
 	/**
-	 * Event queue configuration (optional)
+	 * Offset to start from when no saved session offset exists.
+	 * Use `"now"` to tail only new events or `"-1"` to replay from the beginning.
+	 * @default "now"
 	 */
-	readonly queueConfig?: EventQueueConfig
+	readonly resumeOffset?: string
 
 	/**
-	 * Event dispatcher configuration (optional)
+	 * Optional session store for persisting the last acknowledged durable-stream offset.
+	 * Defaults to an in-memory store.
 	 */
-	readonly dispatcherConfig?: import("./services/event-dispatcher.ts").EventDispatcherConfig
+	readonly sessionStore?: import("./gateway.ts").GatewaySessionStore
+
+	/**
+	 * Optional bot-local state store for durable bot state like tracked thread mappings.
+	 * Defaults to an in-memory store.
+	 */
+	readonly stateStore?: import("./gateway.ts").BotStateStore
+
+	/**
+	 * Maximum number of gateway partitions to process concurrently.
+	 * Ordering is still preserved within each partition.
+	 * @default 8
+	 */
+	readonly maxConcurrentPartitions?: number
+
+	/**
+	 * Override websocket heartbeat cadence when the gateway HELLO frame should be ignored.
+	 */
+	readonly heartbeatIntervalMs?: number
 
 	/**
 	 * Service name for tracing (optional)
@@ -1423,43 +1776,11 @@ export interface HazelBotConfig<Commands extends CommandGroup<any> = EmptyComman
 	}
 }
 
-type EventPipelineDispatcher = Pick<
-	Context.Tag.Service<typeof EventDispatcher>,
-	"registeredEventTypes" | "start"
->
-
-type EventPipelineSubscriber = Pick<Context.Tag.Service<typeof ShapeStreamSubscriber>, "start">
-
 /**
- * Start the DB event pipeline (shape streams + dispatcher) only when DB event handlers exist.
- * Command-only bots intentionally skip this pipeline to avoid unnecessary startup warnings.
- */
-export const startBotEventPipeline = (
-	dispatcher: EventPipelineDispatcher,
-	subscriber: EventPipelineSubscriber,
-) =>
-	Effect.gen(function* () {
-		// Derive required tables from registered event handlers
-		const eventTypes = yield* dispatcher.registeredEventTypes
-		if (eventTypes.length === 0) {
-			yield* Effect.logDebug(
-				"No DB event handlers registered; skipping shape streams and dispatcher startup",
-			).pipe(Effect.annotateLogs("service", "BotClient"))
-			return
-		}
-
-		const requiredTables = extractTablesFromEventTypes(eventTypes)
-
-		// Start shape stream subscriptions (only for tables with handlers)
-		yield* subscriber.start(requiredTables)
-		yield* dispatcher.start
-	})
-
-/**
- * Create a Hazel bot runtime with pre-configured subscriptions
+ * Create a Hazel bot runtime with pre-configured Hazel gateway events
  *
  * This is the simplest way to create a bot for Hazel integrations.
- * All Hazel domain schemas (messages, channels, channel_members) are pre-configured.
+ * All inbound Hazel events are delivered over the gateway websocket.
  *
  * @example
  * ```typescript
@@ -1498,42 +1819,14 @@ export const startBotEventPipeline = (
 export const createHazelBot = <Commands extends CommandGroup<any> = EmptyCommands>(
 	config: HazelBotConfig<Commands>,
 ): ManagedRuntime.ManagedRuntime<HazelBotClient, unknown> => {
-	// Apply defaults for URLs
-	const electricUrl = config.electricUrl ?? "https://electric.hazel.sh/v1/shape"
 	const backendUrl = config.backendUrl ?? "https://api.hazel.sh"
+	const gatewayUrl = config.gatewayUrl ?? backendUrl
 	const actorsEndpoint =
 		config.actorsEndpoint ??
 		process.env.ACTORS_URL ??
 		process.env.RIVET_PUBLIC_ENDPOINT ??
 		process.env.RIVET_URL ??
 		DEFAULT_ACTORS_ENDPOINT
-
-	// Create all the required layers using layerConfig pattern
-	const EventQueueLayer = ElectricEventQueue.layerConfig(
-		Config.succeed(
-			config.queueConfig ?? {
-				capacity: 1000,
-				backpressureStrategy: "sliding" as const,
-			},
-		),
-	)
-
-	const ShapeSubscriberLayer = ShapeStreamSubscriber.layerConfig(
-		Config.succeed({
-			electricUrl,
-			botToken: config.botToken,
-			subscriptions: HAZEL_SUBSCRIPTIONS,
-		}),
-	)
-
-	const EventDispatcherLayer = EventDispatcher.layerConfig(
-		Config.succeed(
-			config.dispatcherConfig ?? {
-				maxRetries: 3,
-				retryBaseDelay: 100,
-			},
-		),
-	)
 
 	const AuthLayer = Layer.unwrapEffect(
 		createAuthContextFromToken(config.botToken, backendUrl).pipe(
@@ -1550,50 +1843,26 @@ export const createHazelBot = <Commands extends CommandGroup<any> = EmptyCommand
 	// Create the scoped RPC client layer
 	const RpcClientLayer = BotRpcClientLive.pipe(Layer.provide(RpcClientConfigLayer))
 
-	// Create SSE command listener layer if commands are configured
-	const hasCommands = config.commands && config.commands.commands.length > 0
-	const CommandListenerLayer = hasCommands
-		? Layer.provide(
-				SseCommandListenerLive({
-					backendUrl,
-					botToken: Redacted.make(config.botToken),
-				}),
-				AuthLayer,
-			)
-		: Layer.empty
+	// Create runtime config layer for gateway consumption, command syncing, and mentionable state.
+	const RuntimeConfigLayer = Layer.succeed(HazelBotRuntimeConfigTag, {
+		backendUrl,
+		gatewayUrl,
+		botToken: config.botToken,
+		commands: config.commands ?? EmptyCommandGroup,
+		mentionable: config.mentionable ?? false,
+		actorsEndpoint,
+		resumeOffset: config.resumeOffset ?? "now",
+		maxConcurrentPartitions: config.maxConcurrentPartitions ?? 8,
+		heartbeatIntervalMs: config.heartbeatIntervalMs,
+	})
 
-	// Create runtime config layer for command syncing and mentionable flag
-	const needsRuntimeConfig = hasCommands || config.mentionable !== undefined
-	const RuntimeConfigLayer = needsRuntimeConfig
-		? Layer.succeed(HazelBotRuntimeConfigTag, {
-				backendUrl,
-				botToken: config.botToken,
-				commands: config.commands ?? EmptyCommandGroup,
-				mentionable: config.mentionable ?? false,
-				actorsEndpoint,
-			})
-		: Layer.empty
+	const GatewaySessionStoreLayer = config.sessionStore
+		? Layer.succeed(GatewaySessionStoreTag, config.sessionStore)
+		: InMemoryGatewaySessionStoreLive
 
-	// Create the typed BotClient layer for Hazel subscriptions
-	const BotClientTag = createBotClientTag<typeof HAZEL_SUBSCRIPTIONS>()
-	const BotClientLayer = Layer.effect(
-		BotClientTag,
-		Effect.gen(function* () {
-			const dispatcher = yield* EventDispatcher
-			const subscriber = yield* ShapeStreamSubscriber
-			const auth = yield* BotAuth
-
-			return {
-				on: (eventType, handler) => dispatcher.on(eventType, handler),
-				start: Effect.gen(function* () {
-					yield* Effect.logDebug("Starting bot client...")
-					yield* startBotEventPipeline(dispatcher, subscriber)
-					yield* Effect.logDebug("Bot client started successfully")
-				}),
-				getAuthContext: auth.getContext.pipe(Effect.orDie),
-			}
-		}),
-	)
+	const BotStateStoreLayer = config.stateStore
+		? Layer.succeed(BotStateStoreTag, config.stateStore)
+		: InMemoryBotStateStoreLive
 
 	// Create logger layer with configurable level and format
 	// Defaults: INFO level, format based on NODE_ENV
@@ -1628,24 +1897,14 @@ export const createHazelBot = <Commands extends CommandGroup<any> = EmptyCommand
 	// Compose all layers with proper dependency order
 	const AllLayers = Layer.mergeAll(
 		HazelBotClient.Default.pipe(
-			Layer.provide(BotClientLayer),
 			Layer.provide(RpcClientLayer),
 			Layer.provide(RpcClientConfigLayer),
-			Layer.provide(CommandListenerLayer),
+			Layer.provide(BotStateStoreLayer),
+			Layer.provide(GatewaySessionStoreLayer),
 			Layer.provide(RuntimeConfigLayer),
 		),
 		HealthServerLayer,
-	).pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				Layer.provide(EventDispatcherLayer, EventQueueLayer),
-				Layer.provide(ShapeSubscriberLayer, EventQueueLayer),
-				AuthLayer,
-			),
-		),
-		Layer.provide(LoggerLayer),
-		Layer.provide(TracingLayer),
-	)
+	).pipe(Layer.provide(AuthLayer), Layer.provide(LoggerLayer), Layer.provide(TracingLayer))
 
 	// Create runtime
 	return ManagedRuntime.make(AllLayers)

@@ -1,151 +1,328 @@
-import { describe, expect, it, beforeAll, afterAll, afterEach } from "@effect/vitest"
-import { Effect, Layer, Ref, Scope } from "effect"
-import { ShapeStreamStartupError } from "./errors.ts"
-import { http, HttpResponse } from "msw"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "@effect/vitest"
+import { Duration, Effect, Layer, Ref } from "effect"
+import { delay, http, HttpResponse } from "msw"
 import { setupServer } from "msw/node"
 import {
-	HAZEL_SUBSCRIPTIONS,
-	HazelBotClient,
-	HazelBotRuntimeConfigTag,
-	startBotEventPipeline,
-} from "./hazel-bot-sdk.ts"
-import { EmptyCommandGroup } from "./command.ts"
-import { createBotClientTag } from "./bot-client.ts"
+	BotGatewayAckFrame,
+	BotGatewayClientFrame,
+	BotGatewayDispatchFrame,
+	BotGatewayHelloFrame,
+	BotGatewayReadyFrame,
+} from "@hazel/domain"
+import { BotAuth } from "./auth.ts"
+import { Command, CommandGroup, EmptyCommandGroup } from "./command.ts"
+import { HazelBotClient, HazelBotRuntimeConfigTag } from "./hazel-bot-sdk.ts"
 import { BotRpcClient, BotRpcClientConfigTag } from "./rpc/client.ts"
+import { BotStateStoreTag, GatewaySessionStoreTag } from "./gateway.ts"
+import { Schema } from "effect"
 
 const BACKEND_URL = "http://localhost:3070"
+const GATEWAY_URL = "http://localhost:3034"
+const BOT_ID = "00000000-0000-0000-0000-000000000111"
+const USER_ID = "00000000-0000-0000-0000-000000000222"
+const ORG_ID = "00000000-0000-0000-0000-000000000333"
+const CHANNEL_ID = "00000000-0000-0000-0000-000000000444"
+const BOT_TOKEN = "test-bot-token"
 
-const server = setupServer(
-	http.patch(`${BACKEND_URL}/bot-commands/settings`, async () => HttpResponse.json({ success: true })),
-)
+const EchoCommand = Command.make("echo", {
+	description: "Echo text back",
+	args: { text: Schema.String },
+})
 
-describe("HazelBotClient mention handling", () => {
+const commandEnvelope = {
+	schemaVersion: 1 as const,
+	deliveryId: "delivery-1",
+	partitionKey: `org:${ORG_ID}:channel:${CHANNEL_ID}`,
+	occurredAt: 1_700_000_000_000,
+	idempotencyKey: `command:${BOT_ID}:echo:${CHANNEL_ID}:1700000000000`,
+	eventType: "command.invoke" as const,
+	payload: {
+		commandName: "echo",
+		channelId: CHANNEL_ID,
+		userId: USER_ID,
+		orgId: ORG_ID,
+		arguments: { text: "hello" },
+		timestamp: 1_700_000_000_000,
+	},
+}
+
+const server = setupServer()
+
+class FakeWebSocket {
+	static readonly CONNECTING = 0
+	static readonly OPEN = 1
+	static readonly CLOSING = 2
+	static readonly CLOSED = 3
+	static onSend:
+		| ((socket: FakeWebSocket, frame: Schema.Schema.Type<typeof BotGatewayClientFrame>) => void)
+		| null = null
+	static onCreate: ((socket: FakeWebSocket) => void) | null = null
+	static instances: Array<FakeWebSocket> = []
+
+	readonly listeners = new Map<string, Array<(event: any) => void>>()
+	readyState = FakeWebSocket.OPEN
+
+	constructor(readonly url: string) {
+		FakeWebSocket.instances.push(this)
+		queueMicrotask(() => {
+			this.emit("open", {})
+			FakeWebSocket.onCreate?.(this)
+		})
+	}
+
+	addEventListener(type: string, listener: (event: any) => void) {
+		const existing = this.listeners.get(type) ?? []
+		existing.push(listener)
+		this.listeners.set(type, existing)
+	}
+
+	send(data: string) {
+		const frame = JSON.parse(data) as Schema.Schema.Type<typeof BotGatewayClientFrame>
+		FakeWebSocket.onSend?.(this, frame)
+	}
+
+	close(code = 1000, reason = "") {
+		if (this.readyState === FakeWebSocket.CLOSED) {
+			return
+		}
+		this.readyState = FakeWebSocket.CLOSED
+		this.emit("close", { code, reason })
+	}
+
+	emitServerFrame(
+		frame:
+			| Schema.Schema.Type<typeof BotGatewayHelloFrame>
+			| Schema.Schema.Type<typeof BotGatewayReadyFrame>
+			| Schema.Schema.Type<typeof BotGatewayDispatchFrame>,
+	) {
+		this.emit("message", { data: JSON.stringify(frame) })
+	}
+
+	private emit(type: string, event: any) {
+		for (const listener of this.listeners.get(type) ?? []) {
+			listener(event)
+		}
+	}
+
+	static reset() {
+		FakeWebSocket.onSend = null
+		FakeWebSocket.onCreate = null
+		FakeWebSocket.instances = []
+	}
+}
+
+const makeHazelBotLayer = (options: { sessionStore: any; commands?: CommandGroup<any> }) => {
+	return HazelBotClient.Default.pipe(
+		Layer.provide(
+			BotAuth.Default({
+				botId: BOT_ID,
+				botName: "Test Bot",
+				userId: USER_ID,
+				channelIds: [] as readonly string[],
+				token: BOT_TOKEN,
+			}),
+		),
+		Layer.provide(Layer.succeed(BotRpcClient, {} as any)),
+		Layer.provide(
+			Layer.succeed(BotRpcClientConfigTag, {
+				backendUrl: BACKEND_URL,
+				botToken: BOT_TOKEN,
+			}),
+		),
+		Layer.provide(
+			Layer.succeed(HazelBotRuntimeConfigTag, {
+				backendUrl: BACKEND_URL,
+				gatewayUrl: GATEWAY_URL,
+				botToken: BOT_TOKEN,
+				commands: options.commands ?? EmptyCommandGroup,
+				mentionable: false,
+				actorsEndpoint: "http://localhost:6420",
+				resumeOffset: "now",
+				maxConcurrentPartitions: 2,
+			}),
+		),
+		Layer.provide(Layer.succeed(GatewaySessionStoreTag, options.sessionStore)),
+		Layer.provide(
+			Layer.succeed(BotStateStoreTag, {
+				get: () => Effect.succeed(null),
+				set: () => Effect.void,
+				delete: () => Effect.void,
+			}),
+		),
+	)
+}
+
+describe("HazelBotClient durable gateway", () => {
 	beforeAll(() => {
 		server.listen({ onUnhandledRequest: "error" })
 	})
 
 	afterEach(() => {
 		server.resetHandlers()
+		FakeWebSocket.reset()
 	})
 
 	afterAll(() => {
 		server.close()
 	})
 
-	it("registers mention handler before bot.start", () =>
+	it("persists the next offset only after successful command handling", () =>
 		Effect.runPromise(
 			Effect.gen(function* () {
-				const registered = yield* Ref.make<string[]>([])
-				const BotClientTag = createBotClientTag<typeof HAZEL_SUBSCRIPTIONS>()
+				const handledArgsRef = yield* Ref.make<Array<string>>([])
+				const savedOffsetsRef = yield* Ref.make<Array<string>>([])
+				const sentFramesRef = yield* Ref.make<Array<string>>([])
+				const originalWebSocket = globalThis.WebSocket
 
-				const botClientStub = {
-					on: (eventType: string, _handler: unknown) =>
-						Ref.update(registered, (events) => [...events, eventType]).pipe(Effect.asVoid),
-					start: Effect.gen(function* () {
-						const events = yield* Ref.get(registered)
-						if (!events.includes("messages.insert")) {
-							return yield* Effect.fail(
-								new ShapeStreamStartupError({
-									message: "messages.insert not registered before bot.start",
-									cause: undefined,
-								}),
-							)
-						}
-					}).pipe(Effect.asVoid) as Effect.Effect<void, ShapeStreamStartupError, Scope.Scope>,
-					getAuthContext: Effect.succeed({
-						botId: "bot-1",
-						botName: "Test Bot",
-						userId: "user-1",
-						channelIds: [] as readonly string[],
-						token: "test-bot-token",
-					}),
-				}
-
-				const TestLayer = HazelBotClient.Default.pipe(
-					Layer.provide(Layer.succeed(BotClientTag, botClientStub)),
-					Layer.provide(Layer.succeed(BotRpcClient, {} as any)),
-					Layer.provide(
-						Layer.succeed(BotRpcClientConfigTag, {
-							backendUrl: BACKEND_URL,
-							botToken: "test-bot-token",
-						}),
+				server.use(
+					http.post(`${BACKEND_URL}/bot-commands/sync`, async () =>
+						HttpResponse.json({ syncedCount: 1 }),
 					),
-					Layer.provide(
-						Layer.succeed(HazelBotRuntimeConfigTag, {
-							backendUrl: BACKEND_URL,
-							botToken: "test-bot-token",
-							commands: EmptyCommandGroup,
-							mentionable: true,
-							actorsEndpoint:
-								"https://hazel-d9c8-production-e8b3:pk_UecfBPkebh46hBcaDkKrAWD6ot3SPvDsB4ybSlOVtf3p8z6EKQiyaOWPLkUqUBBT@api.rivet.dev",
-						}),
+					http.patch(`${BACKEND_URL}/bot-commands/settings`, async () =>
+						HttpResponse.json({ success: true }),
 					),
 				)
 
-				const program = Effect.gen(function* () {
-					const bot = yield* HazelBotClient
-					yield* bot.onMention(() => Effect.void)
-					yield* bot.start
+				globalThis.WebSocket = FakeWebSocket as any
+				FakeWebSocket.onCreate = (socket) => {
+					socket.emitServerFrame({
+						op: "HELLO",
+						heartbeatIntervalMs: 60_000,
+					})
+				}
+				FakeWebSocket.onSend = (socket, frame) => {
+					Ref.update(sentFramesRef, (frames) => [...frames, frame.op]).pipe(Effect.runSync)
+					if (frame.op === "IDENTIFY") {
+						socket.emitServerFrame({
+							op: "READY",
+							sessionId: "session-1",
+							resumed: false,
+							resumeOffset: "now",
+						})
+						socket.emitServerFrame({
+							op: "DISPATCH",
+							sessionId: "session-1",
+							events: [commandEnvelope],
+							nextOffset: "1",
+						})
+					}
+					if (frame.op === "ACK") {
+						socket.close()
+					}
+				}
+
+				const TestLayer = makeHazelBotLayer({
+					commands: CommandGroup.make(EchoCommand),
+					sessionStore: {
+						load: () => Effect.succeed(null),
+						save: (_botId, offset) =>
+							Ref.update(savedOffsetsRef, (offsets) => [...offsets, offset]).pipe(
+								Effect.asVoid,
+							),
+					},
 				})
 
-				yield* program.pipe(Effect.scoped, Effect.provide(TestLayer))
-			}) as Effect.Effect<void, unknown, never>,
-		))
-})
+				yield* Effect.gen(function* () {
+					const bot = yield* HazelBotClient
+					yield* bot.onCommand(EchoCommand, (ctx) =>
+						Ref.update(handledArgsRef, (handled) => [...handled, ctx.args.text]).pipe(
+							Effect.asVoid,
+						),
+					)
+					yield* bot.start
+					yield* Effect.sleep(Duration.millis(100))
 
-describe("startBotEventPipeline", () => {
-	it("skips shape stream and dispatcher startup when no DB handlers are registered", () =>
-		Effect.runPromise(
-			Effect.scoped(
-				Effect.gen(function* () {
-					const shapeStreamStarts = yield* Ref.make(0)
-					const dispatcherStarts = yield* Ref.make(0)
-
-					const dispatcher = {
-						registeredEventTypes: Effect.succeed([] as string[]),
-						start: Ref.update(dispatcherStarts, (n) => n + 1).pipe(Effect.asVoid),
-					}
-
-					const subscriber = {
-						start: (_tables?: ReadonlySet<string>) =>
-							Ref.update(shapeStreamStarts, (n) => n + 1).pipe(Effect.asVoid),
-					}
-
-					yield* startBotEventPipeline(dispatcher as any, subscriber as any)
-
-					expect(yield* Ref.get(shapeStreamStarts)).toBe(0)
-					expect(yield* Ref.get(dispatcherStarts)).toBe(0)
-				}),
-			),
+					expect(yield* Ref.get(handledArgsRef)).toEqual(["hello"])
+					expect(yield* Ref.get(savedOffsetsRef)).toEqual(["1"])
+					expect(yield* Ref.get(sentFramesRef)).toContain("ACK")
+				}).pipe(
+					Effect.scoped,
+					Effect.provide(TestLayer),
+					Effect.ensuring(
+						Effect.sync(() => {
+							globalThis.WebSocket = originalWebSocket
+						}),
+					),
+				)
+			}),
 		))
 
-	it("starts shape streams and dispatcher when DB handlers exist", () =>
+	it("does not advance the offset when command handling fails", () =>
 		Effect.runPromise(
-			Effect.scoped(
-				Effect.gen(function* () {
-					const requiredTablesRef = yield* Ref.make<ReadonlySet<string> | undefined>(undefined)
-					const dispatcherStarts = yield* Ref.make(0)
+			Effect.gen(function* () {
+				const attemptsRef = yield* Ref.make(0)
+				const savedOffsetsRef = yield* Ref.make<Array<string>>([])
+				const sentFramesRef = yield* Ref.make<Array<string>>([])
+				const originalWebSocket = globalThis.WebSocket
 
-					const dispatcher = {
-						registeredEventTypes: Effect.succeed([
-							"messages.insert",
-							"channels.update",
-						] as string[]),
-						start: Ref.update(dispatcherStarts, (n) => n + 1).pipe(Effect.asVoid),
+				server.use(
+					http.post(`${BACKEND_URL}/bot-commands/sync`, async () =>
+						HttpResponse.json({ syncedCount: 1 }),
+					),
+					http.patch(`${BACKEND_URL}/bot-commands/settings`, async () =>
+						HttpResponse.json({ success: true }),
+					),
+				)
+
+				globalThis.WebSocket = FakeWebSocket as any
+				FakeWebSocket.onCreate = (socket) => {
+					socket.emitServerFrame({
+						op: "HELLO",
+						heartbeatIntervalMs: 60_000,
+					})
+				}
+				FakeWebSocket.onSend = (socket, frame) => {
+					Ref.update(sentFramesRef, (frames) => [...frames, frame.op]).pipe(Effect.runSync)
+					if (frame.op === "IDENTIFY") {
+						socket.emitServerFrame({
+							op: "READY",
+							sessionId: "session-1",
+							resumed: false,
+							resumeOffset: "now",
+						})
+						socket.emitServerFrame({
+							op: "DISPATCH",
+							sessionId: "session-1",
+							events: [commandEnvelope],
+							nextOffset: "1",
+						})
+						setTimeout(() => socket.close(1011, "test-finished"), 50)
 					}
+				}
 
-					const subscriber = {
-						start: (tables?: ReadonlySet<string>) =>
-							Ref.set(requiredTablesRef, tables).pipe(Effect.asVoid),
-					}
+				const TestLayer = makeHazelBotLayer({
+					commands: CommandGroup.make(EchoCommand),
+					sessionStore: {
+						load: () => Effect.succeed(null),
+						save: (_botId, offset) =>
+							Ref.update(savedOffsetsRef, (offsets) => [...offsets, offset]).pipe(
+								Effect.asVoid,
+							),
+					},
+				})
 
-					yield* startBotEventPipeline(dispatcher as any, subscriber as any)
+				yield* Effect.gen(function* () {
+					const bot = yield* HazelBotClient
+					yield* bot.onCommand(EchoCommand, () =>
+						Ref.update(attemptsRef, (attempts) => attempts + 1).pipe(
+							Effect.zipRight(Effect.fail(new Error("boom"))),
+						),
+					)
+					yield* bot.start
+					yield* Effect.sleep(Duration.millis(100))
 
-					const requiredTables = yield* Ref.get(requiredTablesRef)
-					expect(requiredTables).toBeDefined()
-					expect(Array.from(requiredTables ?? []).sort()).toEqual(["channels", "messages"])
-					expect(yield* Ref.get(dispatcherStarts)).toBe(1)
-				}),
-			),
+					expect(yield* Ref.get(attemptsRef)).toBe(1)
+					expect(yield* Ref.get(savedOffsetsRef)).toEqual([])
+					expect(yield* Ref.get(sentFramesRef)).not.toContain("ACK")
+				}).pipe(
+					Effect.scoped,
+					Effect.provide(TestLayer),
+					Effect.ensuring(
+						Effect.sync(() => {
+							globalThis.WebSocket = originalWebSocket
+						}),
+					),
+				)
+			}),
 		))
 })
