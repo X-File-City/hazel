@@ -8,6 +8,7 @@ export * from "./desktop-auth-errors"
 export * as ErrorUtils from "./error-utils"
 export * from "./errors"
 export * from "./bot-gateway"
+export * from "./actor-service-errors"
 // HTTP API contracts
 export * as Http from "./http"
 // Integration utilities

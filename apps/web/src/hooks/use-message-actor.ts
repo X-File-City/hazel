@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { ACTOR_SERVICE_ERROR_UI_MESSAGE, isTemporaryActorServiceError } from "@hazel/domain"
 import type { MessageId } from "@hazel/schema"
 import type { AgentStep } from "~/components/chat/agent-steps-view"
 import { rivetClient, getAccessToken } from "~/lib/rivet-client"
@@ -53,6 +54,26 @@ const initialState: MessageActorState = {
 	currentStepIndex: null,
 }
 
+function getErrorMessage(error: unknown): string {
+	if (typeof error === "string") return error
+	if (error instanceof Error) return error.message
+	if (
+		typeof error === "object" &&
+		error !== null &&
+		"message" in error &&
+		typeof (error as { message?: unknown }).message === "string"
+	) {
+		return (error as { message: string }).message
+	}
+	return "Connection failed. Please try again."
+}
+
+export function normalizeMessageActorError(error: unknown): string {
+	return isTemporaryActorServiceError(error)
+		? ACTOR_SERVICE_ERROR_UI_MESSAGE
+		: getErrorMessage(error)
+}
+
 /**
  * Create initial state from cached data
  */
@@ -63,7 +84,7 @@ function stateFromCache(cached: CachedActorState): MessageActorState {
 		text: cached.text ?? "",
 		isStreaming: false,
 		progress: cached.progress ?? (cached.status === "completed" ? 100 : null),
-		error: cached.error ?? null,
+		error: cached.error ? normalizeMessageActorError(cached.error) : null,
 		startedAt: null,
 		completedAt: cached.status === "completed" || cached.status === "failed" ? Date.now() : null,
 		steps: cached.steps ? [...cached.steps] : [],
@@ -144,6 +165,19 @@ export function useMessageActor(
 				if (disposed) return
 				console.error("[useMessageActor] Connection error:", err)
 				setIsConnected(false)
+				safeSetState((prev) => {
+					if (prev.text || prev.steps.length > 0) {
+						return prev
+					}
+
+					return {
+						...prev,
+						status: "failed",
+						error: normalizeMessageActorError(err),
+						completedAt: Date.now(),
+						isStreaming: false,
+					}
+				})
 			})
 
 			// Actor events - using centralized types
@@ -199,7 +233,7 @@ export function useMessageActor(
 				safeSetState((prev) => ({
 					...prev,
 					status: "failed",
-					error: payload.error,
+					error: normalizeMessageActorError(payload.error),
 					completedAt: Date.now(),
 					isStreaming: false,
 				}))

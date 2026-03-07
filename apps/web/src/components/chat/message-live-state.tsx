@@ -1,4 +1,5 @@
 import type { MessageId, OrganizationId } from "@hazel/schema"
+import { ACTOR_SERVICE_ERROR_UI_MESSAGE, ACTOR_SERVICE_ERROR_UI_TITLE } from "@hazel/domain"
 import { useMemo } from "react"
 import { IconBrainSparkle } from "~/components/icons/icon-brain-sparkle"
 import { IconSparkles } from "~/components/icons/icon-sparkles"
@@ -164,6 +165,20 @@ function MessageLiveError() {
 	return <ErrorCard error={state.error} />
 }
 
+export function getMessageLiveErrorCopy(error: string): { title: string; body: string } {
+	if (error === ACTOR_SERVICE_ERROR_UI_MESSAGE) {
+		return {
+			title: ACTOR_SERVICE_ERROR_UI_TITLE,
+			body: ACTOR_SERVICE_ERROR_UI_MESSAGE,
+		}
+	}
+
+	return {
+		title: "Something went wrong",
+		body: error,
+	}
+}
+
 interface MessageLiveDataProps<T> {
 	dataKey: string
 	children: (value: T) => React.ReactNode
@@ -218,6 +233,8 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 function ErrorCard({ error }: { error: string }) {
+	const copy = getMessageLiveErrorCopy(error)
+
 	return (
 		<div
 			className="rounded-lg border border-danger/20 bg-danger/5 p-4 animate-[error-enter_0.3s_var(--ease-out-cubic)_forwards]"
@@ -228,8 +245,8 @@ function ErrorCard({ error }: { error: string }) {
 					<IconWarning className="size-5 text-danger" aria-hidden />
 				</div>
 				<div className="flex-1 space-y-1">
-					<p className="font-medium text-danger text-sm">Something went wrong</p>
-					<p className="text-muted-fg text-sm">{error}</p>
+					<p className="font-medium text-danger text-sm">{copy.title}</p>
+					<p className="text-muted-fg text-sm">{copy.body}</p>
 				</div>
 			</div>
 		</div>

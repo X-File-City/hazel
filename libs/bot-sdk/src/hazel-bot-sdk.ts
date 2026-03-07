@@ -17,6 +17,7 @@ import type {
 	UserId,
 } from "@hazel/schema"
 import {
+	ACTOR_SERVICE_ERROR_BOT_MESSAGE,
 	BotGatewayAckFrame,
 	BotGatewayClientFrame,
 	BotGatewayDispatchFrame,
@@ -27,6 +28,7 @@ import {
 	BotGatewayReadyFrame,
 	BotGatewayReconnectFrame,
 	BotGatewayServerFrame,
+	isTemporaryActorServiceError,
 } from "@hazel/domain"
 import type { IntegrationConnection } from "@hazel/domain/models"
 import { HazelApi } from "@hazel/domain/http"
@@ -96,6 +98,7 @@ import {
 } from "./streaming/index.ts"
 
 const DEFAULT_ACTORS_ENDPOINT = "https://rivet.hazel.sh"
+const GENERIC_COMMAND_ERROR_MESSAGE = "An unexpected error occurred. Please try again."
 
 /**
  * Internal configuration context for HazelBotClient
@@ -898,6 +901,27 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 					),
 			)
 
+		const getUserFacingCommandErrorMessage = (cause: unknown) =>
+			isTemporaryActorServiceError(cause)
+				? ACTOR_SERVICE_ERROR_BOT_MESSAGE
+				: GENERIC_COMMAND_ERROR_MESSAGE
+
+		const sendCommandErrorMessage = (ctx: TypedCommandContext<any>, content: string) =>
+			createMessageFnHelper(ctx.channelId, content, {
+				replyToMessageId: null,
+				threadChannelId: null,
+				embeds: null,
+			}).pipe(
+				Effect.mapError(
+					(cause) =>
+						new MessageSendError({
+							message: "Failed to notify user about command failure",
+							channelId: ctx.channelId,
+							cause,
+						}),
+				),
+			)
+
 		/**
 		 * Helper to update a message (for persisting streaming state).
 		 * Shared between stream.create and ai.stream to avoid code duplication.
@@ -1447,35 +1471,10 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 						Effect.catchTag("CommandHandlerError", (error) =>
 							Effect.gen(function* () {
 								yield* Effect.logError(`Error in /${ctx.commandName} command`, { error })
-								const notifyError = messageLimiter(
-									httpApiClient["api-v1-messages"]
-										.createMessage({
-											payload: {
-												channelId: ctx.channelId,
-												content: "An unexpected error occurred. Please try again.",
-												replyToMessageId: null,
-												threadChannelId: null,
-												embeds: null,
-											},
-										})
-										.pipe(
-											Effect.mapError(
-												(cause) =>
-													new MessageSendError({
-														message:
-															"Failed to notify user about command failure",
-														channelId: ctx.channelId,
-														cause,
-													}),
-											),
-										),
-								).pipe(
-									Effect.catchTag("MessageSendError", (sendError) =>
-										Effect.fail(sendError),
-									),
+								yield* sendCommandErrorMessage(
+									ctx,
+									getUserFacingCommandErrorMessage(error.cause),
 								)
-
-								yield* notifyError
 								return yield* Effect.fail(error)
 							}),
 						),
@@ -1645,13 +1644,24 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 									yield* Effect.logError(`Error in AI streaming for /${ctx.commandName}`, {
 										error,
 									})
+									const userMessage = getUserFacingCommandErrorMessage(error.cause)
+
 									// Mark the session as failed - this updates the existing message
 									yield* session
-										.fail("An unexpected error occurred. Please try again.")
+										.fail(userMessage)
 										.pipe(
 											Effect.catchAllCause((cause) =>
-												Effect.logError("Failed to mark AI stream as failed", {
-													cause,
+												Effect.gen(function* () {
+													yield* Effect.logError("Failed to mark AI stream as failed", {
+														cause,
+													})
+													yield* sendCommandErrorMessage(ctx, userMessage).pipe(
+														Effect.catchAllCause((messageCause) =>
+															Effect.logError("Failed to send AI fallback error message", {
+																cause: messageCause,
+															}),
+														),
+													)
 												}),
 											),
 										)
