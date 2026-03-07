@@ -1,4 +1,5 @@
 import { schema } from "@hazel/db"
+import type { UserId } from "@hazel/schema"
 import { describe, expect, it } from "vitest"
 import {
 	assertWhereClauseParamsAreSequential,
@@ -9,7 +10,7 @@ import {
 
 describe("where-clause-builder channel access", () => {
 	it("buildChannelVisibilityClause uses single channel_access subquery", () => {
-		const result = buildChannelVisibilityClause("user-1", schema.channelsTable.deletedAt)
+		const result = buildChannelVisibilityClause("user-1" as UserId, schema.channelsTable.deletedAt)
 
 		expect(result.params).toEqual(["user-1"])
 		expect(result.whereClause).toContain(`"deletedAt" IS NULL`)
@@ -21,7 +22,7 @@ describe("where-clause-builder channel access", () => {
 
 	it("buildChannelAccessClause includes optional deletedAt and single subquery", () => {
 		const result = buildChannelAccessClause(
-			"user-1",
+			"user-1" as UserId,
 			schema.messagesTable.channelId,
 			schema.messagesTable.deletedAt,
 		)

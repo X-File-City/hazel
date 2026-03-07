@@ -1,7 +1,7 @@
 import { HttpApiClient } from "@effect/platform"
 import { and, Database, eq, isNull, schema, sql } from "@hazel/db"
 import { Cluster, WorkflowInitializationError } from "@hazel/domain"
-import { Config, Effect } from "effect"
+import { Array, Config, Effect, Option } from "effect"
 import { TreeFormatter } from "effect/ParseResult"
 import type {
 	MessageCreatedPayload,
@@ -43,7 +43,10 @@ export class MessageSideEffectService extends Effect.Service<MessageSideEffectSe
 					)
 					.pipe(Effect.catchTag("DatabaseError", () => Effect.succeed([])))
 
-				return integrationBotResult[0]?.id ?? null
+				return Array.head(integrationBotResult).pipe(
+					Option.map((row) => row.id),
+					Option.getOrNull,
+				)
 			})
 
 			const handleMessageCreated = Effect.fn("MessageSideEffectService.handleMessageCreated")(
@@ -90,7 +93,10 @@ export class MessageSideEffectService extends Effect.Service<MessageSideEffectSe
 							),
 						)
 
-					const channelType = channelResult[0]?.type ?? "public"
+					const channelType = Array.head(channelResult).pipe(
+						Option.map((row) => row.type),
+						Option.getOrElse(() => "public" as const),
+					)
 
 					yield* client.workflows
 						.MessageNotificationWorkflowDiscard({
@@ -154,8 +160,15 @@ export class MessageSideEffectService extends Effect.Service<MessageSideEffectSe
 						)
 						.pipe(Effect.catchTag("DatabaseError", () => Effect.succeed([{ count: 0 }])))
 
-					const count = messageCountResult[0]?.count ?? 0
-					if (count <= 3 || channelResult[0]?.name !== "Thread") {
+					const count = Array.head(messageCountResult).pipe(
+						Option.map((r) => r.count),
+						Option.getOrElse(() => 0),
+					)
+					const channelName = Array.head(channelResult).pipe(
+						Option.map((r) => r.name),
+						Option.getOrNull,
+					)
+					if (count <= 3 || channelName !== "Thread") {
 						return
 					}
 
@@ -169,7 +182,8 @@ export class MessageSideEffectService extends Effect.Service<MessageSideEffectSe
 						)
 						.pipe(Effect.catchTag("DatabaseError", () => Effect.succeed([])))
 
-					if (originalMessageResult.length === 0) {
+					const originalMessage = Array.head(originalMessageResult)
+					if (Option.isNone(originalMessage)) {
 						return
 					}
 
@@ -177,7 +191,7 @@ export class MessageSideEffectService extends Effect.Service<MessageSideEffectSe
 						.ThreadNamingWorkflowDiscard({
 							payload: {
 								threadChannelId: payload.channelId,
-								originalMessageId: originalMessageResult[0]!.id,
+								originalMessageId: originalMessage.value.id,
 							},
 						})
 						.pipe(

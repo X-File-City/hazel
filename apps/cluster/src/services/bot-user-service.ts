@@ -1,7 +1,7 @@
 import { Database, eq, schema } from "@hazel/db"
 import { Cluster, Integrations } from "@hazel/domain"
 import type { UserId } from "@hazel/schema"
-import { Effect, Layer, Option } from "effect"
+import { Array, Effect, Layer, Option } from "effect"
 
 /**
  * Service for cached bot user lookups.
@@ -61,14 +61,15 @@ export class BotUserService extends Effect.Service<BotUserService>()("BotUserSer
 						}),
 					)
 
-				if (results.length === 0) {
+				const headOption = Array.head(results)
+				if (Option.isNone(headOption)) {
 					yield* Effect.logWarning(`Bot user not found for provider: ${provider}`, {
 						externalId,
 					})
 					return Option.none<UserId>()
 				}
 
-				const userId = results[0]!.id as UserId
+				const userId = headOption.value.id as UserId
 
 				// Cache the result
 				cache.set(externalId, userId)

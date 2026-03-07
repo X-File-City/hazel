@@ -1,3 +1,4 @@
+import type { ChannelId, NotificationId } from "@hazel/schema"
 import { describe, expect, it } from "vitest"
 import { selectUnreadCount, selectUnreadCountsByChannel } from "./selectors"
 
@@ -34,13 +35,13 @@ describe("notification selectors", () => {
 	})
 
 	it("excludes optimistic read IDs", () => {
-		const optimistic = new Set(["n2"])
+		const optimistic = new Set(["n2" as NotificationId])
 		expect(selectUnreadCount(notifications, optimistic)).toBe(2)
 	})
 
 	it("groups unread counts by channel", () => {
 		const grouped = selectUnreadCountsByChannel(notifications)
-		expect(grouped.get("c1")).toBe(2)
-		expect(grouped.get("c2")).toBe(1)
+		expect(grouped.get("c1" as ChannelId)).toBe(2)
+		expect(grouped.get("c2" as ChannelId)).toBe(1)
 	})
 })

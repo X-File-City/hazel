@@ -1,4 +1,5 @@
 import type { PgColumn } from "drizzle-orm/pg-core"
+import type { UserId } from "@hazel/schema"
 
 /**
  * Result of building a WHERE clause with parameterized values
@@ -175,7 +176,7 @@ export function buildNoFilterClause(): WhereClauseResult {
  * @param deletedAtColumn - The deletedAt column to check for NULL
  * @returns WhereClauseResult with parameterized WHERE clause and subquery
  */
-export function buildChannelVisibilityClause(userId: string, deletedAtColumn: PgColumn): WhereClauseResult {
+export function buildChannelVisibilityClause(userId: UserId, deletedAtColumn: PgColumn): WhereClauseResult {
 	const whereClause = `"${deletedAtColumn.name}" IS NULL AND "id" IN (SELECT "channelId" FROM channel_access WHERE "userId" = $1)`
 
 	return {
@@ -196,7 +197,7 @@ export function buildChannelVisibilityClause(userId: string, deletedAtColumn: Pg
  * @returns WhereClauseResult with parameterized WHERE clause and subquery
  */
 export function buildOrgMembershipClause(
-	userId: string,
+	userId: UserId,
 	orgIdColumn: PgColumn,
 	deletedAtColumn?: PgColumn,
 ): WhereClauseResult {
@@ -217,7 +218,7 @@ export function buildOrgMembershipClause(
  * @returns WhereClauseResult with parameterized WHERE clause and subquery
  */
 export function buildUserOrgMembershipClause(
-	userId: string,
+	userId: UserId,
 	userIdColumn: PgColumn,
 	deletedAtColumn: PgColumn,
 ): WhereClauseResult {
@@ -236,7 +237,7 @@ export function buildUserOrgMembershipClause(
  * @param memberIdColumn - The memberId column to filter on
  * @returns WhereClauseResult with parameterized WHERE clause and subquery
  */
-export function buildUserMembershipClause(userId: string, memberIdColumn: PgColumn): WhereClauseResult {
+export function buildUserMembershipClause(userId: UserId, memberIdColumn: PgColumn): WhereClauseResult {
 	const whereClause = `"${memberIdColumn.name}" IN (SELECT "id" FROM organization_members WHERE "userId" = $1 AND "deletedAt" IS NULL)`
 	return { whereClause, params: [userId] }
 }
@@ -253,7 +254,7 @@ export function buildUserMembershipClause(userId: string, memberIdColumn: PgColu
  * @returns WhereClauseResult with parameterized WHERE clause and subquery
  */
 export function buildChannelAccessClause(
-	userId: string,
+	userId: UserId,
 	channelIdColumn: PgColumn,
 	deletedAtColumn?: PgColumn,
 ): WhereClauseResult {
@@ -273,7 +274,7 @@ export function buildChannelAccessClause(
  * @returns WhereClauseResult with parameterized WHERE clause and subquery
  */
 export function buildIntegrationConnectionClause(
-	userId: string,
+	userId: UserId,
 	deletedAtColumn: PgColumn,
 ): WhereClauseResult {
 	// Org-level connections (userId IS NULL) in user's orgs OR user's own connections

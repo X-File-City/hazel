@@ -1,4 +1,5 @@
 import type { Notification } from "@hazel/domain/models"
+import type { ChannelId, NotificationId, OrganizationMemberId } from "@hazel/schema"
 import { and, eq, isNull, useLiveQuery } from "@tanstack/react-db"
 import { useMemo } from "react"
 import { notificationCollection } from "~/db/collections"
@@ -10,7 +11,7 @@ export type NotificationLike = Pick<
 
 export const isUnreadNotification = (
 	notification: NotificationLike,
-	optimisticReadIds?: ReadonlySet<string>,
+	optimisticReadIds?: ReadonlySet<NotificationId>,
 ): boolean => {
 	if (optimisticReadIds?.has(notification.id)) {
 		return false
@@ -20,7 +21,7 @@ export const isUnreadNotification = (
 
 export const selectUnreadCount = (
 	notifications: ReadonlyArray<NotificationLike>,
-	optimisticReadIds?: ReadonlySet<string>,
+	optimisticReadIds?: ReadonlySet<NotificationId>,
 ): number => {
 	let count = 0
 	for (const notification of notifications) {
@@ -33,23 +34,24 @@ export const selectUnreadCount = (
 
 export const selectUnreadCountsByChannel = (
 	notifications: ReadonlyArray<NotificationLike>,
-	optimisticReadIds?: ReadonlySet<string>,
-): Map<string, number> => {
-	const counts = new Map<string, number>()
+	optimisticReadIds?: ReadonlySet<NotificationId>,
+): Map<ChannelId, number> => {
+	const counts = new Map<ChannelId, number>()
 
 	for (const notification of notifications) {
 		if (!isUnreadNotification(notification, optimisticReadIds)) continue
 		if (notification.targetedResourceType !== "channel") continue
 		if (!notification.targetedResourceId) continue
 
-		const current = counts.get(notification.targetedResourceId) ?? 0
-		counts.set(notification.targetedResourceId, current + 1)
+		const channelId = notification.targetedResourceId as ChannelId
+		const current = counts.get(channelId) ?? 0
+		counts.set(channelId, current + 1)
 	}
 
 	return counts
 }
 
-export const useNotificationUnreadCountsByChannel = (memberId: string | undefined) => {
+export const useNotificationUnreadCountsByChannel = (memberId: OrganizationMemberId | undefined) => {
 	const { data, isLoading } = useLiveQuery(
 		(q) =>
 			memberId
@@ -63,7 +65,7 @@ export const useNotificationUnreadCountsByChannel = (memberId: string | undefine
 	)
 
 	const unreadByChannel = useMemo(() => {
-		if (!data) return new Map<string, number>()
+		if (!data) return new Map<ChannelId, number>()
 		return selectUnreadCountsByChannel(data)
 	}, [data])
 

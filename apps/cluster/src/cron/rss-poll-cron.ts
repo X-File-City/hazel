@@ -103,7 +103,14 @@ export const RssPollCronLayer = ClusterCron.make({
 											})
 											.where(eq(schema.rssSubscriptionsTable.id, sub.id)),
 									)
-									.pipe(Effect.catchAll(() => Effect.void))
+									.pipe(
+										Effect.catchAll((dbErr) =>
+											Effect.logWarning("Failed to increment RSS error counter", {
+												subscriptionId: sub.id,
+												error: String(dbErr),
+											}),
+										),
+									)
 							}),
 						),
 					),

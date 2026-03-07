@@ -1,5 +1,5 @@
 import type { Channel, Message, Notification, User } from "@hazel/domain/models"
-import type { NotificationId } from "@hazel/schema"
+import type { ChannelId, NotificationId } from "@hazel/schema"
 import { and, eq, isNull, useLiveQuery } from "@tanstack/react-db"
 import { Effect } from "effect"
 import { useCallback, useMemo, useState } from "react"
@@ -50,7 +50,7 @@ export interface NotificationWithDetails {
 
 export function useNotifications() {
 	const { memberId, isLoading: memberLoading } = useOrganizationMember()
-	const [optimisticReadIds, setOptimisticReadIds] = useState<Set<string>>(new Set())
+	const [optimisticReadIds, setOptimisticReadIds] = useState<Set<NotificationId>>(new Set())
 
 	const { data: notificationsData, isLoading: notificationsLoading } = useLiveQuery(
 		(q) =>
@@ -172,7 +172,7 @@ export function useUnreadNotificationCount() {
 	}
 }
 
-export function useChannelUnreadCount(channelId: string | null | undefined) {
+export function useChannelUnreadCount(channelId: ChannelId | null | undefined) {
 	const { memberId } = useOrganizationMember()
 	const { unreadByChannel, totalUnread, isLoading } = useNotificationUnreadCountsByChannel(memberId)
 

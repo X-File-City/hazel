@@ -2,7 +2,7 @@ import { Activity } from "@effect/workflow"
 import { and, Database, eq, inArray, isNull, ne, or, schema, sql } from "@hazel/db"
 import { Cluster } from "@hazel/domain"
 import type { ChannelMemberId, NotificationId, OrganizationMemberId, UserId } from "@hazel/schema"
-import { Effect, Schema } from "effect"
+import { Array, Effect, Option, Schema } from "effect"
 
 interface OrgMemberLookupRow {
 	orgMemberId: OrganizationMemberId
@@ -194,18 +194,22 @@ export const MessageNotificationWorkflowLayer = Cluster.MessageNotificationWorkf
 							}),
 						)
 
-					if (replyToMessage.length > 0 && replyToMessage[0]!.authorId !== payload.authorId) {
+					const replyAuthor = Array.head(replyToMessage).pipe(
+						Option.map((msg) => msg.authorId),
+						Option.filter((authorId) => authorId !== payload.authorId),
+					)
+					if (Option.isSome(replyAuthor)) {
 						yield* Effect.logDebug(
-							`Adding reply-to author ${replyToMessage[0]!.authorId} to notification list`,
+							`Adding reply-to author ${replyAuthor.value} to notification list`,
 						)
-						usersToNotify.push(replyToMessage[0]!.authorId)
+						usersToNotify.push(replyAuthor.value)
 					}
 				}
 
 				// Remove duplicates and the author
-				const uniqueUsersToNotify = [...new Set(usersToNotify)].filter(
+				const uniqueUsersToNotify = Array.dedupe(usersToNotify).filter(
 					(userId) => userId !== payload.authorId,
-				) as UserId[]
+				)
 
 				yield* Effect.logDebug(`Unique users to notify: ${uniqueUsersToNotify.length}`)
 
@@ -376,9 +380,9 @@ export const MessageNotificationWorkflowLayer = Cluster.MessageNotificationWorkf
 						}),
 					)
 
-				const insertedChannelMemberIds: ChannelMemberId[] = insertedNotifications
-					.map((row) => channelMemberByOrgMember.get(row.memberId))
-					.filter((id): id is ChannelMemberId => Boolean(id))
+				const insertedChannelMemberIds = Array.filterMap(insertedNotifications, (row) =>
+					Option.fromNullable(channelMemberByOrgMember.get(row.memberId)),
+				)
 
 				if (insertedChannelMemberIds.length > 0) {
 					yield* db
