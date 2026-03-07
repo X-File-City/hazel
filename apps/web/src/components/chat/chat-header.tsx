@@ -43,9 +43,7 @@ function OtherMemberAvatar({ member }: OtherMemberAvatarProps) {
 
 function OtherMemberName({ member }: OtherMemberAvatarProps) {
 	const authorIdentity = useChatAuthorIdentity(member.userId, member.user)
-	return (
-		<>{authorIdentity.displayName}</>
-	)
+	return <>{authorIdentity.displayName}</>
 }
 
 export function ChatHeader() {

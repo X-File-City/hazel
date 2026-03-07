@@ -7,9 +7,7 @@ describe("actor-service-errors", () => {
 	})
 
 	it("classifies auth service unavailable messages as service errors", () => {
-		expect(isTemporaryActorServiceError(new Error("Authentication service unavailable"))).toBe(
-			true,
-		)
+		expect(isTemporaryActorServiceError(new Error("Authentication service unavailable"))).toBe(true)
 	})
 
 	it("classifies nested actor auth failures as service errors", () => {

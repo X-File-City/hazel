@@ -125,7 +125,9 @@ describe("HazelBotClient error handling", () => {
 				const exit = yield* Effect.gen(function* () {
 					const bot = yield* HazelBotClient
 					return yield* bot
-						.withErrorHandler(commandContext)(Effect.fail(new Error("Invalid bot token: Not Found")))
+						.withErrorHandler(commandContext)(
+							Effect.fail(new Error("Invalid bot token: Not Found")),
+						)
 						.pipe(Effect.exit)
 				}).pipe(Effect.scoped, Effect.provide(makeHazelBotLayer()))
 
@@ -166,8 +168,8 @@ describe("HazelBotClient error handling", () => {
 
 				const exit = yield* Effect.gen(function* () {
 					const bot = yield* HazelBotClient
-					return yield* bot
-						.ai.withErrorHandler(commandContext, { fail } as any)(
+					return yield* bot.ai
+						.withErrorHandler(commandContext, { fail } as any)(
 							Effect.fail({ code: "invalid_token", message: "Invalid bot token: Not Found" }),
 						)
 						.pipe(Effect.exit)
@@ -194,8 +196,8 @@ describe("HazelBotClient error handling", () => {
 
 				const exit = yield* Effect.gen(function* () {
 					const bot = yield* HazelBotClient
-					return yield* bot
-						.ai.withErrorHandler(commandContext, { fail } as any)(
+					return yield* bot.ai
+						.withErrorHandler(commandContext, { fail } as any)(
 							Effect.fail({ code: "invalid_token", message: "Invalid bot token: Not Found" }),
 						)
 						.pipe(Effect.exit)

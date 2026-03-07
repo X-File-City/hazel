@@ -55,7 +55,9 @@ export const buildNotificationInsertRows = (
 }
 
 export const MessageNotificationWorkflowLayer = Cluster.MessageNotificationWorkflow.toLayer(
-	Effect.fn("workflow.MessageNotification")(function* (payload: Cluster.MessageNotificationWorkflowPayload) {
+	Effect.fn("workflow.MessageNotification")(function* (
+		payload: Cluster.MessageNotificationWorkflowPayload,
+	) {
 		yield* Effect.annotateCurrentSpan("workflow.message_id", payload.messageId)
 		yield* Effect.annotateCurrentSpan("workflow.channel_id", payload.channelId)
 		yield* Effect.annotateCurrentSpan("workflow.channel_type", payload.channelType)

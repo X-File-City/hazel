@@ -178,7 +178,9 @@ function ThreadContent({
 						/>
 						<div className="min-w-0 flex-1">
 							<div className="flex items-baseline gap-2">
-								<span className="font-medium text-fg text-sm">{authorIdentity.displayName}</span>
+								<span className="font-medium text-fg text-sm">
+									{authorIdentity.displayName}
+								</span>
 								<span className="text-muted-fg text-xs">
 									{format(originalMessage.createdAt, "MMM d, HH:mm")}
 								</span>

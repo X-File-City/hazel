@@ -65,11 +65,7 @@ export function MessageReplySection({ replyToMessageId, onClick }: MessageReplyS
 	)
 }
 
-function LoadedReplySection({
-	data,
-}: {
-	data: MessageWithAuthor
-}) {
+function LoadedReplySection({ data }: { data: MessageWithAuthor }) {
 	const authorIdentity = useChatAuthorIdentity(data.authorId, data.author)
 
 	return (

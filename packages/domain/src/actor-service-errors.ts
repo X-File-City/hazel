@@ -21,11 +21,7 @@ export const ACTOR_SERVICE_ERROR_BOT_MESSAGE =
 
 const RECURSIVE_KEYS = ["cause", "message", "code", "name", "_tag"] as const
 
-function collectRelevantValues(
-	value: unknown,
-	values: Set<string>,
-	seen: WeakSet<object>,
-): void {
+function collectRelevantValues(value: unknown, values: Set<string>, seen: WeakSet<object>): void {
 	if (typeof value === "string") {
 		values.add(value)
 		return

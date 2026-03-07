@@ -1647,24 +1647,25 @@ export class HazelBotClient extends Effect.Service<HazelBotClient>()("HazelBotCl
 									const userMessage = getUserFacingCommandErrorMessage(error.cause)
 
 									// Mark the session as failed - this updates the existing message
-									yield* session
-										.fail(userMessage)
-										.pipe(
-											Effect.catchAllCause((cause) =>
-												Effect.gen(function* () {
-													yield* Effect.logError("Failed to mark AI stream as failed", {
-														cause,
-													})
-													yield* sendCommandErrorMessage(ctx, userMessage).pipe(
-														Effect.catchAllCause((messageCause) =>
-															Effect.logError("Failed to send AI fallback error message", {
+									yield* session.fail(userMessage).pipe(
+										Effect.catchAllCause((cause) =>
+											Effect.gen(function* () {
+												yield* Effect.logError("Failed to mark AI stream as failed", {
+													cause,
+												})
+												yield* sendCommandErrorMessage(ctx, userMessage).pipe(
+													Effect.catchAllCause((messageCause) =>
+														Effect.logError(
+															"Failed to send AI fallback error message",
+															{
 																cause: messageCause,
-															}),
+															},
 														),
-													)
-												}),
-											),
-										)
+													),
+												)
+											}),
+										),
+									)
 									// Do NOT create a new message - the ErrorCard will show the error
 									return yield* Effect.fail(error)
 								}),
