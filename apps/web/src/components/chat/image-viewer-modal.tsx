@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip
 import { useAppHotkey } from "~/hooks/use-app-hotkey"
 import { useEmblaCarouselSync } from "~/hooks/use-embla-carousel-sync"
 import { getAttachmentUrl } from "~/utils/attachment-url"
+import { useChatAuthorIdentity } from "./author-identity"
 import { IconDownload } from "../icons/icon-download"
 import { IconExternalLink } from "../icons/icon-link-external"
 
@@ -49,6 +50,7 @@ export function ImageViewerModal({
 		containScroll: "keepSnaps",
 		dragFree: true,
 	})
+	const authorIdentity = useChatAuthorIdentity(author?.id, author)
 
 	// Manage carousel state and synchronization
 	const { selectedIndex, scrollPrev, scrollNext, scrollTo } = useEmblaCarouselSync({
@@ -159,15 +161,13 @@ export function ImageViewerModal({
 			{author && (
 				<div className="absolute top-5 left-5 flex items-center gap-2">
 					<Avatar
-						src={author.avatarUrl}
-						alt={`${author.firstName} ${author.lastName}`}
-						seed={`${author.firstName} ${author.lastName}`}
+						src={authorIdentity.avatarUrl}
+						alt={authorIdentity.displayName}
+						seed={authorIdentity.seed}
 						size="md"
 					/>
 					<div className="flex flex-col">
-						<span className="text-sm text-white">
-							{author.firstName} {author.lastName}
-						</span>
+						<span className="text-sm text-white">{authorIdentity.displayName}</span>
 						<span className="text-muted-foreground text-xs">
 							{new Date(createdAt).toLocaleString()}
 						</span>

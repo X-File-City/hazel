@@ -1,5 +1,5 @@
 import { Result, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
-import type { MessageId, OrganizationId, UserId } from "@hazel/schema"
+import type { MessageId, OrganizationId } from "@hazel/schema"
 import { format } from "date-fns"
 import { createContext, memo, useCallback, useMemo, useRef, type ReactNode, type RefObject } from "react"
 import type { MessageWithPinned } from "~/atoms/chat-query-atoms"
@@ -14,8 +14,8 @@ import { Badge } from "~/components/ui/badge"
 import { useChatStable } from "~/hooks/use-chat"
 import { useUserStatus } from "~/hooks/use-presence"
 import { useAuth } from "~/lib/auth"
-import { useBotName } from "~/db/hooks"
 import { cn } from "~/lib/utils"
+import { useChatAuthorIdentity, type ChatAuthorIdentity } from "./author-identity"
 import { InlineThreadPreview } from "./inline-thread-preview"
 import { MessageAttachments } from "./message-attachments"
 import { MessageContent } from "./message-content"
@@ -72,6 +72,7 @@ interface MessageContextValue {
 	// User info
 	currentUserId: string | undefined
 	organizationId: OrganizationId | undefined
+	authorIdentity: ChatAuthorIdentity
 	// Aggregated reactions
 	aggregatedReactions: [string, { count: number; users: string[]; hasReacted: boolean }][]
 }
@@ -116,6 +117,7 @@ function MessageProvider({ message, variants, children }: MessageProviderProps) 
 	const isHighlighted = highlight === "search"
 
 	const isRepliedTo = !!message?.replyToMessageId
+	const authorIdentity = useChatAuthorIdentity(message.authorId, message.author)
 
 	// Check if message has embeds (rich/webhook embeds or URL-based embeds)
 	const hasEmbed = useMemo(() => {
@@ -174,6 +176,7 @@ function MessageProvider({ message, variants, children }: MessageProviderProps) 
 		currentUserId: currentUser?.id,
 		// Coerce null to undefined for organizationId
 		organizationId: currentUser?.organizationId ?? undefined,
+		authorIdentity,
 		aggregatedReactions,
 	}
 
@@ -230,15 +233,14 @@ function MessageContextMenuWrapper({ children }: MessageContextMenuWrapperProps)
  * Renders the avatar or hover timestamp based on group position.
  */
 function MessageAvatar() {
-	const { message, showAvatar } = useMessage()
-	const user = message.author
+	const { message, showAvatar, authorIdentity } = useMessage()
 
 	if (showAvatar) {
 		return (
 			<UserProfilePopover
 				userId={message.authorId}
-				userName={user ? `${user.firstName} ${user.lastName}` : undefined}
-				userAvatarUrl={user?.avatarUrl}
+				userName={authorIdentity.displayName || undefined}
+				userAvatarUrl={authorIdentity.avatarUrl}
 			/>
 		)
 	}
@@ -254,7 +256,7 @@ function MessageAvatar() {
  * Renders the message author header with name, status, timestamp, and badges.
  */
 const MessageHeader = memo(function MessageHeader() {
-	const { message, showAvatar, isPinned } = useMessage()
+	const { message, showAvatar, isPinned, authorIdentity } = useMessage()
 	const user = message.author
 	const { statusEmoji, customMessage, statusExpiresAt, quietHours } = useUserStatus(message.authorId)
 	const isDiscordSyncedResult = useAtomValue(isDiscordSyncedMessageAtomFamily(message.id))
@@ -262,12 +264,9 @@ const MessageHeader = memo(function MessageHeader() {
 
 	const isEdited = message.updatedAt && message.updatedAt.getTime() > message.createdAt.getTime()
 
-	// For machine users (bots), prefer bot.name as the source of truth
-	const botName = useBotName(user?.id as UserId | undefined, user?.userType)
-
 	if (!showAvatar || !user) return null
 
-	const fullName = botName ?? `${user.firstName} ${user.lastName}`
+	const fullName = authorIdentity.displayName
 
 	return (
 		<div className="flex items-baseline gap-2">

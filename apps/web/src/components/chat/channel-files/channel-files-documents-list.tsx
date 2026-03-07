@@ -5,6 +5,7 @@ import { Avatar } from "~/components/ui/avatar"
 import { Button } from "~/components/ui/button"
 import { getAttachmentUrl } from "~/utils/attachment-url"
 import { formatFileSize, getFileTypeFromName } from "~/utils/file-utils"
+import { useChatAuthorIdentity } from "../author-identity"
 
 type AttachmentWithUser = typeof Attachment.Model.Type & {
 	user: typeof User.Model.Type | null
@@ -37,6 +38,7 @@ function formatRelativeTime(date: Date): string {
 
 function DocumentItem({ attachment }: { attachment: AttachmentWithUser }) {
 	const fileType = getFileTypeFromName(attachment.fileName)
+	const authorIdentity = useChatAuthorIdentity(attachment.user?.id, attachment.user)
 
 	const handleDownload = () => {
 		const link = document.createElement("a")
@@ -48,13 +50,8 @@ function DocumentItem({ attachment }: { attachment: AttachmentWithUser }) {
 		document.body.removeChild(link)
 	}
 
-	const uploaderName = attachment.user
-		? `${attachment.user.firstName} ${attachment.user.lastName}`
-		: "Unknown"
-
-	const initials = attachment.user
-		? `${attachment.user.firstName.charAt(0)}${attachment.user.lastName.charAt(0)}`
-		: "?"
+	const uploaderName = authorIdentity.displayName || "Unknown"
+	const initials = authorIdentity.initials || "?"
 
 	return (
 		<div className="group flex items-center gap-3 rounded-lg border border-border bg-secondary/30 p-3 transition-colors hover:bg-secondary/60">
@@ -72,9 +69,9 @@ function DocumentItem({ attachment }: { attachment: AttachmentWithUser }) {
 			<div className="flex shrink-0 items-center gap-2">
 				<Avatar
 					size="xs"
-					src={attachment.user?.avatarUrl}
+					src={authorIdentity.avatarUrl}
 					initials={initials}
-					seed={uploaderName}
+					seed={authorIdentity.seed}
 					alt={uploaderName}
 				/>
 				<span className="hidden text-muted-fg text-xs sm:inline">{uploaderName}</span>

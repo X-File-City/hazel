@@ -1,3 +1,4 @@
+import type { User } from "@hazel/domain/models"
 import type { UserId } from "@hazel/schema"
 import { eq, useLiveQuery } from "@tanstack/react-db"
 import { Link } from "@tanstack/react-router"
@@ -16,30 +17,34 @@ import { useAuth } from "~/lib/auth"
 import IconEye from "../icons/icon-eye"
 import { IconMenu } from "../icons/icon-menu"
 import IconThread from "../icons/icon-thread"
+import { useChatAuthorIdentity } from "./author-identity"
 import { PinnedMessagesModal } from "./pinned-messages-modal"
 
 interface OtherMemberAvatarProps {
 	member: {
 		userId: UserId
-		user: {
-			avatarUrl?: string | null
-			firstName: string
-			lastName: string
-		}
+		user: Pick<typeof User.Model.Type, "avatarUrl" | "firstName" | "lastName" | "userType">
 	}
 }
 
 function OtherMemberAvatar({ member }: OtherMemberAvatarProps) {
-	const initials = `${member.user.firstName.charAt(0)}${member.user.lastName.charAt(0)}`
+	const authorIdentity = useChatAuthorIdentity(member.userId, member.user)
 
 	return (
 		<Avatar
 			size="sm"
-			src={member.user.avatarUrl}
-			initials={initials}
-			seed={`${member.user.firstName} ${member.user.lastName}`}
-			alt={`${member.user.firstName} ${member.user.lastName}`}
+			src={authorIdentity.avatarUrl}
+			initials={authorIdentity.initials}
+			seed={authorIdentity.seed}
+			alt={authorIdentity.displayName}
 		/>
+	)
+}
+
+function OtherMemberName({ member }: OtherMemberAvatarProps) {
+	const authorIdentity = useChatAuthorIdentity(member.userId, member.user)
+	return (
+		<>{authorIdentity.displayName}</>
 	)
 }
 
@@ -136,10 +141,16 @@ export function ChatHeader() {
 						)}
 						<div>
 							<h2 className="font-semibold text-fg text-sm">
-								{otherMembers
-									.slice(0, 3)
-									?.map((member) => `${member.user.firstName} ${member.user.lastName}`)
-									.join(", ") || "Direct Message"}{" "}
+								{otherMembers.length > 0 ? (
+									otherMembers.slice(0, 3).map((member, index) => (
+										<span key={member.userId}>
+											{index > 0 ? ", " : null}
+											<OtherMemberName member={member} />
+										</span>
+									))
+								) : (
+									<>Direct Message</>
+								)}{" "}
 								{otherMembers.length > 3 && (
 									<span className="font-normal text-muted-fg text-xs">
 										{` +${otherMembers.length - 3} more`}

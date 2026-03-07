@@ -23,6 +23,7 @@ import type { PresenceStatus } from "~/utils/status"
 import { formatStatusExpiration, getStatusDotColor, getStatusLabel } from "~/utils/status"
 import { formatUserLocalTime, getTimezoneAbbreviation } from "~/utils/timezone"
 import { getEffectivePresenceStatus } from "~/utils/presence"
+import { useChatAuthorIdentity } from "./author-identity"
 
 interface UserProfilePopoverProps {
 	userId: UserId
@@ -68,12 +69,13 @@ function PopoverBody({ userId }: { userId: UserId }) {
 	const user = result?.user
 	const presence = result?.presence
 	const effectiveStatus = getEffectivePresenceStatus(presence ?? null, nowMs)
+	const authorIdentity = useChatAuthorIdentity(userId, user)
 
 	const [isFavorite, setIsFavorite] = useState(false)
 	const [isMuted, setIsMuted] = useState(false)
 
-	const isBot = user?.userType === "machine"
-	const fullName = user ? `${user.firstName} ${user.lastName}` : ""
+	const isBot = authorIdentity.isBot
+	const fullName = authorIdentity.displayName
 
 	// Local time display - updates every minute
 	const [localTime, setLocalTime] = useState(() =>
@@ -169,8 +171,8 @@ function PopoverBody({ userId }: { userId: UserId }) {
 							size="3xl"
 							className="shadow-lg shadow-black/5 ring-[5px] ring-bg"
 							alt={fullName}
-							src={user.avatarUrl}
-							seed={fullName}
+							src={authorIdentity.avatarUrl}
+							seed={authorIdentity.seed}
 							isSquare={isBot}
 						/>
 						{!isBot && (

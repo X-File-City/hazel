@@ -7,8 +7,8 @@ import { threadMessageCountAtomFamily, userWithPresenceAtomFamily } from "~/atom
 import { channelCollection, messageCollection } from "~/db/collections"
 import { useChatStable } from "~/hooks/use-chat"
 import { cx } from "~/utils/cx"
-import { useBotName } from "~/db/hooks"
 import { Avatar } from "../ui/avatar"
+import { useChatAuthorIdentity } from "./author-identity"
 
 interface InlineThreadPreviewProps {
 	threadChannelId: ChannelId
@@ -137,7 +137,7 @@ function AvatarStackItem({ authorId, index }: { authorId: UserId; index: number 
 	const userPresenceResult = useAtomValue(userWithPresenceAtomFamily(authorId))
 	const data = Result.getOrElse(userPresenceResult, () => [])
 	const user = data[0]?.user
-	const botName = useBotName(authorId, user?.userType)
+	const authorIdentity = useChatAuthorIdentity(authorId, user)
 
 	if (!user) {
 		return (
@@ -145,13 +145,12 @@ function AvatarStackItem({ authorId, index }: { authorId: UserId; index: number 
 		)
 	}
 
-	const displayName = botName ?? `${user.firstName} ${user.lastName}`
-
 	return (
 		<Avatar
-			src={user.avatarUrl}
-			initials={`${displayName[0] ?? ""}`}
-			seed={displayName}
+			src={authorIdentity.avatarUrl}
+			initials={authorIdentity.initials}
+			seed={authorIdentity.seed}
+			alt={authorIdentity.displayName}
 			size="xxs"
 			className="ring-[1.5px] ring-bg"
 			isSquare

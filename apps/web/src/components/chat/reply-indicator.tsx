@@ -3,6 +3,7 @@ import { useMessage } from "~/db/hooks"
 import { cn } from "~/lib/utils"
 import IconClose from "../icons/icon-close"
 import { Button } from "../ui/button"
+import { useChatAuthorIdentity } from "./author-identity"
 
 interface ReplyIndicatorProps {
 	className?: string
@@ -12,6 +13,7 @@ interface ReplyIndicatorProps {
 
 export function ReplyIndicator({ className, replyToMessageId, onClose }: ReplyIndicatorProps) {
 	const { data, isLoading } = useMessage(replyToMessageId)
+	const authorIdentity = useChatAuthorIdentity(data?.authorId, data?.author)
 
 	if (isLoading) {
 		return (
@@ -48,9 +50,7 @@ export function ReplyIndicator({ className, replyToMessageId, onClose }: ReplyIn
 		>
 			<div className="flex items-center gap-2 text-sm">
 				<span className="text-muted-fg">Replying to</span>
-				<span className="font-semibold text-fg">
-					{data.author.firstName} {data.author.lastName}
-				</span>
+				<span className="font-semibold text-fg">{authorIdentity.displayName}</span>
 				<span className="max-w-xs truncate text-muted-fg">{data.content.split("\n")[0]}</span>
 			</div>
 			<Button size="sq-xs" intent="plain" onPress={onClose} aria-label="Cancel reply" className="!p-1">

@@ -16,6 +16,7 @@ import { Avatar } from "../ui/avatar"
 import { Button } from "../ui/button"
 import { Loader } from "../ui/loader"
 import { Tooltip, TooltipContent } from "../ui/tooltip"
+import { useChatAuthorIdentity } from "./author-identity"
 import { SlateMessageComposer } from "./slate-editor/slate-message-composer"
 import { SlateMessageViewer } from "./slate-editor/slate-message-viewer"
 import { ThreadMessageList } from "./thread-message-list"
@@ -41,6 +42,7 @@ function ThreadContent({
 	const [isGenerating, setIsGenerating] = React.useState(false)
 
 	const generateName = useAtomSet(generateThreadNameMutation, { mode: "promiseExit" })
+	const authorIdentity = useChatAuthorIdentity(originalMessage?.authorId, originalMessage?.author)
 
 	const { data: threadData } = useLiveQuery(
 		(q) => q.from({ channel: channelCollection }).where((q) => eq(q.channel.id, threadChannelId)),
@@ -168,15 +170,15 @@ function ThreadContent({
 				<div className="border-border border-b bg-secondary px-4 py-3">
 					<div className="flex gap-3">
 						<Avatar
-							src={originalMessage.author.avatarUrl}
-							initials={`${originalMessage.author.firstName} ${originalMessage.author.lastName}`}
+							src={authorIdentity.avatarUrl}
+							initials={authorIdentity.initials}
+							seed={authorIdentity.seed}
+							alt={authorIdentity.displayName}
 							className="size-9"
 						/>
 						<div className="min-w-0 flex-1">
 							<div className="flex items-baseline gap-2">
-								<span className="font-medium text-fg text-sm">
-									{originalMessage.author.firstName} {originalMessage.author.lastName}
-								</span>
+								<span className="font-medium text-fg text-sm">{authorIdentity.displayName}</span>
 								<span className="text-muted-fg text-xs">
 									{format(originalMessage.createdAt, "MMM d, HH:mm")}
 								</span>

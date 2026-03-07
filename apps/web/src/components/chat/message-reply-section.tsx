@@ -1,11 +1,17 @@
 import { Result, useAtomValue } from "@effect-atom/atom-react"
+import type { Message, User } from "@hazel/domain/models"
 import type { MessageId } from "@hazel/schema"
 import { messageWithAuthorAtomFamily } from "~/atoms/message-atoms"
 import { Avatar } from "../ui/avatar"
+import { useChatAuthorIdentity } from "./author-identity"
 
 interface MessageReplySectionProps {
 	replyToMessageId: MessageId
 	onClick?: () => void
+}
+
+type MessageWithAuthor = typeof Message.Model.Type & {
+	author: typeof User.Model.Type
 }
 
 export function MessageReplySection({ replyToMessageId, onClick }: MessageReplySectionProps) {
@@ -47,21 +53,7 @@ export function MessageReplySection({ replyToMessageId, onClick }: MessageReplyS
 					))
 					.onSuccess((data) =>
 						data ? (
-							<>
-								<Avatar
-									size="xs"
-									src={data.author.avatarUrl}
-									initials={`${data.author.firstName[0]}${data.author.lastName[0]}`}
-									seed={`${data.author.firstName} ${data.author.lastName}`}
-									alt={`${data.author.firstName} ${data.author.lastName}`}
-								/>
-								<span className="font-medium text-fg text-sm hover:underline">
-									{data.author.firstName} {data.author.lastName}
-								</span>
-								<span className="max-w-xs truncate text-ellipsis text-muted-fg text-sm">
-									{data.content.split("\n")[0]}
-								</span>
-							</>
+							<LoadedReplySection data={data} />
 						) : (
 							<span className="text-muted-fg text-sm">Message not found</span>
 						),
@@ -70,5 +62,29 @@ export function MessageReplySection({ replyToMessageId, onClick }: MessageReplyS
 					.render()}
 			</button>
 		</div>
+	)
+}
+
+function LoadedReplySection({
+	data,
+}: {
+	data: MessageWithAuthor
+}) {
+	const authorIdentity = useChatAuthorIdentity(data.authorId, data.author)
+
+	return (
+		<>
+			<Avatar
+				size="xs"
+				src={authorIdentity.avatarUrl}
+				initials={authorIdentity.initials}
+				seed={authorIdentity.seed}
+				alt={authorIdentity.displayName}
+			/>
+			<span className="font-medium text-fg text-sm hover:underline">{authorIdentity.displayName}</span>
+			<span className="max-w-xs truncate text-ellipsis text-muted-fg text-sm">
+				{data.content.split("\n")[0]}
+			</span>
+		</>
 	)
 }
