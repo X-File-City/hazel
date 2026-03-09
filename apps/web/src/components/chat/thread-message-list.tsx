@@ -1,9 +1,9 @@
 import { Result, useAtomValue } from "@effect-atom/atom-react"
 import type { ChannelId } from "@hazel/schema"
-import { useEffect, useMemo, useRef } from "react"
-import { useOverlayPosition } from "react-aria"
+import { useCallback, useMemo } from "react"
 import { createPortal } from "react-dom"
 import type { MessageWithPinned } from "~/atoms/chat-query-atoms"
+import { useMessageToolbarOverlay } from "~/hooks/use-message-toolbar-overlay"
 import { threadMessagesWithAuthorAtomFamily } from "~/atoms/message-atoms"
 import { MessageHoverProvider, useMessageHover } from "~/providers/message-hover-provider"
 import type { MessageGroupPosition } from "./message"
@@ -41,15 +41,6 @@ interface ProcessedThreadMessage {
 
 function ThreadMessageListContent({ threadChannelId }: ThreadMessageListProps) {
 	const { state, actions, meta } = useMessageHover()
-	const overlayRef = useRef<HTMLDivElement>(null)
-	const targetRef = useRef<HTMLDivElement | null>(null)
-
-	// Keep targetRef in sync with context state
-	useEffect(() => {
-		if (state.targetRef) {
-			targetRef.current = state.targetRef
-		}
-	}, [state.targetRef])
 
 	// Query thread messages with author data using the new atom
 	const messagesResult = useAtomValue(threadMessagesWithAuthorAtomFamily({ threadChannelId }))
@@ -60,15 +51,10 @@ function ThreadMessageListContent({ threadChannelId }: ThreadMessageListProps) {
 		() => messages.find((m) => m.id === state.hoveredMessageId) || null,
 		[messages, state.hoveredMessageId],
 	)
-
-	// Position the toolbar relative to the hovered message
-	const { overlayProps } = useOverlayPosition({
-		targetRef,
-		overlayRef,
-		placement: "top end",
-		offset: -6,
-		shouldFlip: true,
-		isOpen: state.hoveredMessageId !== null,
+	const isToolbarRequested = state.hoveredMessageId !== null || meta.isToolbarMenuOpen
+	const { overlayRef, overlayProps, hasAnchorTarget } = useMessageToolbarOverlay({
+		targetElement: state.targetElement,
+		isOpen: isToolbarRequested,
 	})
 
 	// Process messages with grouping logic
@@ -108,6 +94,20 @@ function ThreadMessageListContent({ threadChannelId }: ThreadMessageListProps) {
 		})
 	}, [messages])
 
+	const handlePointerOver = useCallback(
+		(e: React.PointerEvent) => {
+			const messageEl = (e.target as HTMLElement).closest("[data-id]") as HTMLDivElement | null
+			if (messageEl) {
+				actions.setHovered(messageEl.dataset.id!, messageEl)
+			}
+		},
+		[actions],
+	)
+
+	const handlePointerLeave = useCallback(() => {
+		actions.setHovered(null, null)
+	}, [actions])
+
 	if (messages.length === 0) {
 		return (
 			<div className="flex h-full items-center justify-center p-4">
@@ -117,7 +117,11 @@ function ThreadMessageListContent({ threadChannelId }: ThreadMessageListProps) {
 	}
 
 	return (
-		<div className="flex h-full flex-col overflow-y-auto px-2 py-2">
+		<div
+			className="flex h-full flex-col overflow-y-auto px-2 py-2"
+			onPointerOver={handlePointerOver}
+			onPointerLeave={handlePointerLeave}
+		>
 			{/* Apply highlight style to hovered message */}
 			{state.hoveredMessageId && (
 				<style>{`#message-${state.hoveredMessageId} { background-color: var(--color-secondary) !important; }`}</style>
@@ -128,8 +132,9 @@ function ThreadMessageListContent({ threadChannelId }: ThreadMessageListProps) {
 			))}
 
 			{/* Toolbar portal - renders floating toolbar when hovering a message */}
-			{(state.hoveredMessageId || meta.isToolbarMenuOpen) &&
+			{isToolbarRequested &&
 				hoveredMessage &&
+				hasAnchorTarget &&
 				createPortal(
 					<div
 						ref={overlayRef}

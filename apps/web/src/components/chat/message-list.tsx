@@ -2,12 +2,12 @@ import { LegendList, type LegendListRef, type ViewToken } from "@legendapp/list"
 import { useAtomValue } from "@effect-atom/atom-react"
 import type { ChannelId } from "@hazel/schema"
 import { useLiveInfiniteQuery } from "@tanstack/react-db"
-import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
-import { useOverlayPosition } from "react-aria"
+import { memo, useCallback, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { editingMessageAtomFamily } from "~/atoms/chat-atoms"
 import type { MessageWithPinned, ProcessedMessage } from "~/atoms/chat-query-atoms"
 import { useVisibleMessageNotificationCleaner } from "~/hooks/use-visible-message-notification-cleaner"
+import { useMessageToolbarOverlay } from "~/hooks/use-message-toolbar-overlay"
 import { MessageHoverProvider, useMessageHover } from "~/providers/message-hover-provider"
 
 import { Route } from "~/routes/_app/$orgSlug/chat/$id"
@@ -135,18 +135,9 @@ function MessageListContent({
 	legendListRef,
 }: MessageListContentProps) {
 	const { state, actions, meta } = useMessageHover()
-	const overlayRef = useRef<HTMLDivElement>(null)
-	const targetRef = useRef<HTMLDivElement | null>(null)
 
 	// Subscribe to editing state directly via atom (avoids ChatProvider dependency)
 	const editingMessageId = useAtomValue(editingMessageAtomFamily(channelId))
-
-	// Keep targetRef in sync with context state
-	useEffect(() => {
-		if (state.targetRef) {
-			targetRef.current = state.targetRef
-		}
-	}, [state.targetRef])
 
 	// Hook for clearing notifications when messages become visible
 	const { onVisibleMessagesChange } = useVisibleMessageNotificationCleaner({
@@ -176,14 +167,10 @@ function MessageListContent({
 	}, [messages])
 
 	const hoveredMessage = state.hoveredMessageId ? (messageMap.get(state.hoveredMessageId) ?? null) : null
-
-	const { overlayProps } = useOverlayPosition({
-		targetRef,
-		overlayRef,
-		placement: "top end",
-		offset: -6,
-		shouldFlip: true,
-		isOpen: state.hoveredMessageId !== null,
+	const isToolbarRequested = state.hoveredMessageId !== null || meta.isToolbarMenuOpen
+	const { overlayRef, overlayProps, hasAnchorTarget } = useMessageToolbarOverlay({
+		targetElement: state.targetElement,
+		isOpen: isToolbarRequested,
 	})
 
 	// Process messages without reversing the array.
@@ -316,8 +303,9 @@ function MessageListContent({
 				onViewableItemsChanged={handleViewableItemsChanged}
 			/>
 
-			{(state.hoveredMessageId || meta.isToolbarMenuOpen) &&
+			{isToolbarRequested &&
 				hoveredMessage &&
+				hasAnchorTarget &&
 				createPortal(
 					<div
 						ref={overlayRef}

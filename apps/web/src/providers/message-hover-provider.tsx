@@ -2,7 +2,7 @@ import { createContext, useCallback, useMemo, useRef, useState, type ReactNode }
 
 interface MessageHoverState {
 	hoveredMessageId: string | null
-	targetRef: HTMLDivElement | null
+	targetElement: HTMLDivElement | null
 }
 
 interface MessageHoverMeta {
@@ -10,10 +10,10 @@ interface MessageHoverMeta {
 	isToolbarHovered: boolean
 }
 
-type SetHovered = (messageId: string | null, ref: HTMLDivElement | null) => void
+type SetHovered = (messageId: string | null, element: HTMLDivElement | null) => void
 
 interface MessageHoverActions {
-	setHovered: (messageId: string | null, ref: HTMLDivElement | null) => void
+	setHovered: (messageId: string | null, element: HTMLDivElement | null) => void
 	setToolbarMenuOpen: (open: boolean) => void
 	setToolbarHovered: (hovered: boolean) => void
 	clearHover: () => void
@@ -63,11 +63,11 @@ export function MessageHoverProvider({ children, hideDelay = 200 }: MessageHover
 	}, [])
 
 	const setHovered: SetHovered = useCallback(
-		(messageId: string | null, ref: HTMLDivElement | null) => {
+		(messageId: string | null, element: HTMLDivElement | null) => {
 			if (messageId) {
 				clearHideTimeout()
 				setHoveredMessageId(messageId)
-				setTargetElement(ref)
+				setTargetElement(element?.isConnected ? element : null)
 			} else if (!isToolbarMenuOpen && !isToolbarHovered) {
 				hideTimeoutRef.current = window.setTimeout(() => {
 					setHoveredMessageId(null)
@@ -103,7 +103,7 @@ export function MessageHoverProvider({ children, hideDelay = 200 }: MessageHover
 		() => ({
 			state: {
 				hoveredMessageId,
-				targetRef: targetElement,
+				targetElement,
 			},
 			actions: {
 				setHovered,
