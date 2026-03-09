@@ -6,20 +6,20 @@ import IntegrationUseCasesSection from "@/components/sections/IntegrationUseCase
 import IntegrationFAQSection from "@/components/sections/IntegrationFAQSection.astro";
 import CTASection from "@/components/sections/CTASection.astro";
 import FooterSection from "@/components/sections/FooterSection.astro";
-import { getCollection } from "astro:content";
+import { getCollection, type CollectionEntry } from "astro:content";
 
 export async function getStaticPaths() {
-	const integrations = await getCollection("integrations", ({ data }) => {
+	const integrations = await getCollection("integrations", ({ data }: CollectionEntry<"integrations">) => {
 		return import.meta.env.PROD ? !data.draft : true;
 	});
 
-	return integrations.map((integration) => ({
+	return integrations.map((integration: CollectionEntry<"integrations">) => ({
 		params: { slug: integration.id.replace(/\.md$/, "") },
 		props: { integration },
 	}));
 }
 
-const { integration } = Astro.props;
+const { integration } = Astro.props as { integration: CollectionEntry<"integrations"> };
 
 const {
 	name,

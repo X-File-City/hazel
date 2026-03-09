@@ -22,7 +22,7 @@ import { siteConfig } from "@/lib/config";
         class="flex flex-col items-start justify-start gap-y-5 md:flex-row md:items-center md:justify-between lg:pl-10"
       >
         {
-          siteConfig.footerLinks.map((column, columnIndex) => (
+          siteConfig.footerLinks.map((column) => (
             <ul class="flex flex-col gap-y-2">
               <li class="mb-2 font-semibold text-primary text-sm">
                 {column.title}
@@ -81,9 +81,7 @@ import { siteConfig } from "@/lib/config";
   // Handle responsive text for FlickeringGrid
   // This is a simple approach - you could also make FlickeringGrid accept props dynamically
   const updateFlickeringText = () => {
-    const isTablet = window.matchMedia("(max-width: 1024px)").matches;
-    // You might need to update the FlickeringGrid component to accept dynamic text
-    // For now, this is a placeholder for responsive behavior
+    // Placeholder for responsive behavior
   };
 
   if (typeof window !== "undefined") {

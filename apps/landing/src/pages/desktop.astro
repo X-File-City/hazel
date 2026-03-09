@@ -5,7 +5,7 @@ import AppPreviewSection from "@/components/sections/AppPreviewSection.astro";
 import SystemRequirementsSection from "@/components/sections/SystemRequirementsSection.astro";
 import FooterSection from "@/components/sections/FooterSection.astro";
 import { PlatformDownloadSection } from "@/components/react/PlatformDownloadSection";
-import { fetchLatestRelease, type ReleaseData } from "@/lib/download-config";
+import { fetchLatestRelease } from "@/lib/download-config";
 
 // Fetch latest release from GitHub at build time
 const release = await fetchLatestRelease();

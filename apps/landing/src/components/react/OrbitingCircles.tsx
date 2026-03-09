@@ -1,9 +1,8 @@
 import { cn } from "@/lib/utils"
 import { cubicBezier, motion, useInView } from "motion/react"
-import type { HTMLAttributes } from "react"
 import React, { useEffect, useRef, useState } from "react"
 
-export interface OrbitingCirclesProps extends HTMLAttributes<HTMLDivElement> {
+export interface OrbitingCirclesProps {
 	className?: string
 	children?: React.ReactNode
 	reverse?: boolean
@@ -30,7 +29,6 @@ export function OrbitingCircles({
 	index = 0,
 	startAnimationDelay = 0,
 	once = false,
-	...props
 }: OrbitingCirclesProps) {
 	const calculatedDuration = duration / speed
 
@@ -114,7 +112,6 @@ export function OrbitingCircles({
 									damping: 18,
 									mass: 1,
 								}}
-								{...props}
 							>
 								{child}
 							</motion.div>

@@ -2,16 +2,16 @@
 import Layout from "@/layouts/Layout.astro";
 import FooterSection from "@/components/sections/FooterSection.astro";
 import CTASection from "@/components/sections/CTASection.astro";
-import { getCollection } from "astro:content";
+import { getCollection, type CollectionEntry } from "astro:content";
 import { integrationCategories, type IntegrationCategory, type IntegrationStatus } from "@/content/config";
 
-const integrations = await getCollection("integrations", ({ data }) => {
+const integrations = await getCollection("integrations", ({ data }: CollectionEntry<"integrations">) => {
 	return import.meta.env.PROD ? !data.draft : true;
 });
 
 const integrationsByCategory = integrationCategories.reduce(
 	(acc, category) => {
-		acc[category] = integrations.filter((i) => i.data.category === category);
+		acc[category] = integrations.filter((i: CollectionEntry<"integrations">) => i.data.category === category);
 		return acc;
 	},
 	{} as Record<IntegrationCategory, typeof integrations>
@@ -103,7 +103,7 @@ const statusLabels: Record<IntegrationStatus, string> = {
 								</div>
 
 								<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-									{items.map((integration) => (
+									{items.map((integration: CollectionEntry<"integrations">) => (
 										<a
 											href={`/integrations/${integration.id.replace(/\.md$/, "")}`}
 											class="group relative flex items-start gap-5 p-6 rounded-2xl border border-border/50 bg-gradient-to-b from-accent/30 to-transparent hover:border-border hover:shadow-lg hover:shadow-secondary/5 transition-all duration-300"
@@ -127,9 +127,9 @@ const statusLabels: Record<IntegrationStatus, string> = {
 													</h3>
 													{integration.data.status !== "available" && (
 														<span
-															class={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${statusStyles[integration.data.status]}`}
+															class={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${statusStyles[integration.data.status as IntegrationStatus]}`}
 														>
-															{statusLabels[integration.data.status]}
+															{statusLabels[integration.data.status as IntegrationStatus]}
 														</span>
 													)}
 												</div>

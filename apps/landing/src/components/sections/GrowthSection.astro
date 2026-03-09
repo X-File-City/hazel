@@ -30,7 +30,6 @@ const { title, description, items } = siteConfig.growthSection;
     <div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-x md:divide-y-0">
       {items.map((item) => (
         <div
-          key={item.id}
           class="flex flex-col items-start justify-end gap-2 p-6 min-h-[500px]"
         >
           {item.id === 1 ? (
