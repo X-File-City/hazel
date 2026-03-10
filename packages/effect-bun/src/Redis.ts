@@ -1,5 +1,5 @@
 import { RedisClient } from "bun"
-import { Config, Context, Effect, Layer, Match, Schema } from "effect"
+import { Config, Context, Duration, Effect, Layer, Match, Schema } from "effect"
 
 // ============ Error Types ============
 
@@ -234,7 +234,15 @@ export class Redis extends Context.Tag("@hazel/effect-bun/Redis")<
 				yield* Effect.tryPromise({
 					try: () => client.connect(),
 					catch: mapRedisError,
-				})
+				}).pipe(
+					Effect.timeoutFail({
+						duration: Duration.seconds(10),
+						onTimeout: () =>
+							new RedisError({
+								message: `Redis connection timed out after 10s (url: ${url.replace(/\/\/.*@/, "//***@")})`,
+							}),
+					}),
+				)
 
 				yield* Effect.log(`Redis connected: ${url}`)
 
@@ -260,7 +268,15 @@ export class Redis extends Context.Tag("@hazel/effect-bun/Redis")<
 			yield* Effect.tryPromise({
 				try: () => client.connect(),
 				catch: mapRedisError,
-			})
+			}).pipe(
+				Effect.timeoutFail({
+					duration: Duration.seconds(10),
+					onTimeout: () =>
+						new RedisError({
+							message: `Redis connection timed out after 10s (url: ${url.replace(/\/\/.*@/, "//***@")})`,
+						}),
+				}),
+			)
 
 			yield* Effect.log(`Redis connected: ${url}`)
 

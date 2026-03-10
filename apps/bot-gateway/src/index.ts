@@ -12,7 +12,7 @@ import {
 import { Redis } from "@hazel/effect-bun"
 import type { BotId } from "@hazel/schema"
 import type { ServerWebSocket } from "bun"
-import { Config, ConfigProvider, Deferred, Effect, Layer, Option, Ref, Runtime, Schema } from "effect"
+import { Config, ConfigProvider, Deferred, Duration, Effect, Layer, Option, Ref, Runtime, Schema } from "effect"
 import { TracerLive } from "./observability/tracer"
 
 const DEFAULT_PORT = 3034
@@ -103,7 +103,7 @@ const extractGatewayOp = (payload: string | BufferSource): string | undefined =>
 class GatewayConfig extends Effect.Service<GatewayConfig>()("GatewayConfig", {
 	accessors: true,
 	effect: Effect.gen(function* () {
-		return {
+		const config = {
 			port: yield* Config.integer("PORT").pipe(Config.withDefault(DEFAULT_PORT)),
 			isDev: yield* Config.boolean("IS_DEV").pipe(Config.withDefault(false)),
 			databaseUrl: yield* Config.redacted("DATABASE_URL"),
@@ -121,6 +121,11 @@ class GatewayConfig extends Effect.Service<GatewayConfig>()("GatewayConfig", {
 				Config.withDefault(DEFAULT_BATCH_ACK_TIMEOUT_MS),
 			),
 		} as const
+		yield* Effect.logInfo("Config loaded", {
+			port: config.port,
+			durableStreamsUrl: config.durableStreamsUrl,
+		})
+		return config
 	}),
 }) {}
 
@@ -129,6 +134,10 @@ class GatewayAuthError extends Schema.TaggedError<GatewayAuthError>()("GatewayAu
 }) {}
 
 class GatewayProtocolError extends Schema.TaggedError<GatewayProtocolError>()("GatewayProtocolError", {
+	message: Schema.String,
+}) {}
+
+class GatewayStartupError extends Schema.TaggedError<GatewayStartupError>()("GatewayStartupError", {
 	message: Schema.String,
 }) {}
 
@@ -705,6 +714,7 @@ class BotGatewayHub extends Effect.Service<BotGatewayHub>()("BotGatewayHub", {
 const DatabaseLive = Layer.unwrapEffect(
 	Effect.gen(function* () {
 		const config = yield* GatewayConfig
+		yield* Effect.logInfo("Connecting to database...")
 		return Database.layer({
 			url: config.databaseUrl,
 			ssl: !config.isDev,
@@ -872,6 +882,16 @@ const program = Effect.gen(function* () {
 	})
 
 	return yield* Effect.never
-}).pipe(Effect.scoped, Effect.provide(MainLive))
+}).pipe(
+	Effect.scoped,
+	Effect.provide(MainLive),
+	Effect.timeoutFail({
+		duration: Duration.seconds(30),
+		onTimeout: () =>
+			new GatewayStartupError({
+				message: "Layer initialization timed out after 30s — check DATABASE_URL and REDIS_URL connectivity",
+			}),
+	}),
+)
 
 BunRuntime.runMain(program as Effect.Effect<never, unknown, never>)

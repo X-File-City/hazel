@@ -100,7 +100,7 @@ const makeService = (config: Config) =>
 				postgres(Redacted.value(config.url), {
 					ssl: config.ssl,
 					idle_timeout: 0,
-					connect_timeout: 0,
+					connect_timeout: 10,
 				}),
 			),
 			(pool) => Effect.promise(() => pool.end()),
@@ -109,7 +109,8 @@ const makeService = (config: Config) =>
 		yield* Effect.tryPromise(() => sql`SELECT 1`).pipe(
 			Effect.retry(
 				Schedule.jitteredWith(Schedule.spaced("1.25 seconds"), { min: 0.5, max: 1.5 }).pipe(
-					Schedule.tapOutput((output) =>
+					Schedule.intersect(Schedule.recurs(10)),
+					Schedule.tapOutput(([output]) =>
 						Effect.logWarning(
 							`[Database client]: Connection to the database failed. Retrying (attempt ${output}).`,
 						),
