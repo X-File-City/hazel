@@ -12,7 +12,7 @@ import {
 	OrganizationMemberRepo,
 	UserRepo,
 } from "@hazel/backend-core"
-import { Database } from "@hazel/db"
+import { Database, type TxFn } from "@hazel/db"
 import type {
 	ChannelId,
 	ExternalChannelId,
@@ -161,8 +161,10 @@ const makeWorkerLayer = (deps: WorkerLayerDeps) =>
 					deps.databaseExecute ? deps.databaseExecute(query) : Effect.succeed([]),
 				transaction: (effect: any) =>
 					Effect.provideService(effect, Database.TransactionContext, {
-						execute: (query: unknown) =>
-							deps.databaseExecute ? deps.databaseExecute(query) : Effect.succeed([]),
+						execute: ((query: unknown) =>
+							deps.databaseExecute
+								? deps.databaseExecute(query)
+								: Effect.succeed([])) as TxFn,
 					}),
 				makeQuery: () => Effect.die("not used in this test"),
 				makeQueryWithSchema: () => Effect.die("not used in this test"),
