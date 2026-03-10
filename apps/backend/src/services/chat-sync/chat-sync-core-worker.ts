@@ -775,6 +775,72 @@ export class ChatSyncCoreWorker extends Effect.Service<ChatSyncCoreWorker>()("Ch
 			})
 		})
 
+		const DISCORD_USER_MENTION_PATTERN = /@\[userId:([^\]]+)\]/g
+
+		const getDiscordMentionFallbackDisplayName = Effect.fn(
+			"DiscordSyncWorker.getDiscordMentionFallbackDisplayName",
+		)(function* (userId: UserId) {
+			const userOption = yield* userRepo.findById(userId)
+			if (Option.isNone(userOption)) {
+				return "@unknown-user"
+			}
+
+			const user = userOption.value
+			const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim()
+			if (fullName.length > 0) {
+				return `@${fullName}`
+			}
+
+			const firstName = user.firstName.trim()
+			if (firstName.length > 0) {
+				return `@${firstName}`
+			}
+
+			return "@unknown-user"
+		})
+
+		const translateHazelMentionsForDiscord = Effect.fn(
+			"DiscordSyncWorker.translateHazelMentionsForDiscord",
+		)(function* (params: {
+			organizationId: OrganizationId
+			content: string
+		}) {
+			const userIds = [...params.content.matchAll(DISCORD_USER_MENTION_PATTERN)].map(
+				(match) => match[1] as UserId,
+			)
+
+			if (userIds.length === 0) {
+				return params.content
+			}
+
+			const replacements = new Map<string, string>()
+
+			for (const userId of new Set(userIds)) {
+				const connectionOption = yield* integrationConnectionRepo.findUserConnection(
+					params.organizationId,
+					userId,
+					"discord",
+				)
+
+				if (Option.isSome(connectionOption)) {
+					const connection = connectionOption.value
+					const externalAccountId = connection.externalAccountId?.trim()
+
+					if (connection.status === "active" && externalAccountId) {
+						replacements.set(userId, `<@${externalAccountId}>`)
+						continue
+					}
+				}
+
+				const fallbackDisplayName = yield* getDiscordMentionFallbackDisplayName(userId)
+				replacements.set(userId, fallbackDisplayName)
+			}
+
+			return params.content.replace(DISCORD_USER_MENTION_PATTERN, (fullMatch, userId: string) =>
+				replacements.get(userId) ?? fullMatch,
+			)
+		})
+
 		const normalizeChannelLinkExternalId = <T extends { externalChannelId: string }>(link: T) => ({
 			...link,
 			externalChannelId: link.externalChannelId as ExternalChannelId,
@@ -1073,6 +1139,13 @@ export class ChatSyncCoreWorker extends Effect.Service<ChatSyncCoreWorker>()("Ch
 						)
 					: undefined
 				const attachments = yield* listMessageAttachmentsForOutboundSync(message.id)
+				const outboundContent =
+					connection.provider === "discord"
+						? yield* translateHazelMentionsForDiscord({
+								organizationId: connection.organizationId,
+								content: message.content,
+							})
+						: message.content
 
 				let externalMessageId: ExternalMessageId
 				if (connection.provider === "discord") {
@@ -1085,7 +1158,7 @@ export class ChatSyncCoreWorker extends Effect.Service<ChatSyncCoreWorker>()("Ch
 						message: {
 							authorId: message.authorId,
 						},
-						content: message.content,
+						content: outboundContent,
 						attachments,
 						replyToExternalMessageId,
 					})
@@ -1095,14 +1168,14 @@ export class ChatSyncCoreWorker extends Effect.Service<ChatSyncCoreWorker>()("Ch
 					} else if (attachments.length > 0) {
 						externalMessageId = yield* adapter.createMessageWithAttachments({
 							externalChannelId: normalizedLink.externalChannelId,
-							content: message.content,
+							content: outboundContent,
 							attachments,
 							replyToExternalMessageId,
 						})
 					} else {
 						externalMessageId = yield* adapter.createMessage({
 							externalChannelId: normalizedLink.externalChannelId,
-							content: message.content,
+							content: outboundContent,
 							replyToExternalMessageId,
 						})
 					}
@@ -1277,12 +1350,19 @@ export class ChatSyncCoreWorker extends Effect.Service<ChatSyncCoreWorker>()("Ch
 			}
 			const messageLink = messageLinkOption.value
 			const normalizedMessageLink = normalizeMessageLinkExternalId(messageLink)
+			const outboundContent =
+				connection.provider === "discord"
+					? yield* translateHazelMentionsForDiscord({
+							organizationId: connection.organizationId,
+							content: message.content,
+						})
+					: message.content
 
 			if (connection.provider !== "discord") {
 				yield* adapter.updateMessage({
 					externalChannelId: normalizedLink.externalChannelId,
 					externalMessageId: normalizedMessageLink.externalMessageId,
-					content: message.content,
+					content: outboundContent,
 				})
 			} else {
 				const updated = yield* updateDiscordMessageViaWebhook({
@@ -1292,14 +1372,14 @@ export class ChatSyncCoreWorker extends Effect.Service<ChatSyncCoreWorker>()("Ch
 						settings: link.settings,
 					},
 					externalMessageId: normalizedMessageLink.externalMessageId,
-					content: message.content,
+					content: outboundContent,
 				})
 
 				if (!updated) {
 					yield* adapter.updateMessage({
 						externalChannelId: normalizedLink.externalChannelId,
 						externalMessageId: normalizedMessageLink.externalMessageId,
-						content: message.content,
+						content: outboundContent,
 					})
 				}
 			}
