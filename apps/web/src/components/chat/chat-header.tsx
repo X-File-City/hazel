@@ -1,5 +1,5 @@
 import type { User } from "@hazel/domain/models"
-import type { UserId } from "@hazel/schema"
+import type { ChannelId, UserId } from "@hazel/schema"
 import { eq, useLiveQuery } from "@tanstack/react-db"
 import { Link } from "@tanstack/react-router"
 import { ChannelIcon } from "~/components/channel-icon"
@@ -13,6 +13,7 @@ import { useChannelWithCurrentUser, useParentChannel } from "~/db/hooks"
 import { useChannelMemberActions } from "~/hooks/use-channel-member-actions"
 import { useChatStable } from "~/hooks/use-chat"
 import { useOrganization } from "~/hooks/use-organization"
+import { useSharedChannels } from "~/hooks/use-shared-channels"
 import { useAuth } from "~/lib/auth"
 import IconEye from "../icons/icon-eye"
 import { IconMenu } from "../icons/icon-menu"
@@ -51,7 +52,7 @@ export function ChatHeader() {
 	const { user } = useAuth()
 	const { channel } = useChannelWithCurrentUser(channelId)
 	const { isMobile, setIsOpenOnMobile } = useSidebar()
-	const { slug } = useOrganization()
+	const { slug, organizationId } = useOrganization()
 
 	const { handleToggleHidden } = useChannelMemberActions(channel?.currentUser, "conversation")
 
@@ -65,6 +66,10 @@ export function ChatHeader() {
 				.select(({ channel: c }) => ({ ...c })),
 		[channelId],
 	)
+
+	// Get partner orgs for shared channel
+	const sharedChannels = useSharedChannels(organizationId)
+	const partnerOrgs = sharedChannels.get(channelId as ChannelId) ?? []
 
 	// Determine if this is a thread and fetch parent channel data
 	const isThread = channel?.type === "thread"
@@ -160,8 +165,34 @@ export function ChatHeader() {
 				) : (
 					<>
 						<ChannelIcon icon={channel.icon} className="size-5 text-muted-fg" />
-						<div>
+						<div className="flex items-center gap-2">
 							<h2 className="font-semibold text-fg text-sm">{channel.name}</h2>
+							{partnerOrgs.length > 0 && (
+								<Tooltip>
+									<div className="flex items-center gap-1.5">
+										<span className="text-muted-fg text-xs">with</span>
+										<div className="flex items-center -space-x-1">
+											{partnerOrgs.map((org) => (
+												<Avatar
+													key={org.id}
+													size="xxs"
+													isSquare
+													src={org.logoUrl}
+													seed={org.name}
+												/>
+											))}
+										</div>
+										{partnerOrgs.length === 1 && partnerOrgs[0] && (
+											<span className="text-muted-fg text-xs">
+												{partnerOrgs[0].name}
+											</span>
+										)}
+									</div>
+									<TooltipContent>
+										Shared with {partnerOrgs.map((o) => o.name).join(", ")}
+									</TooltipContent>
+								</Tooltip>
+							)}
 						</div>
 					</>
 				)}

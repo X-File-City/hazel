@@ -73,6 +73,7 @@ export default defineConfig({
 			output: {
 				manualChunks: {
 					"vendor-react": ["react", "react-dom"],
+					"vendor-videojs": ["@videojs/react", "@videojs/core", "@videojs/store"],
 					"vendor-effect": [
 						"effect",
 						"@effect/platform",
