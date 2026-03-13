@@ -113,6 +113,20 @@ export default defineConfig({
 		},
 	},
 	plugins: [
+		// PrismJS language components (prismjs/components/prism-*.js) are IIFEs that
+		// reference a bare global `Prism`. Rolldown wraps the prismjs core in a lazy
+		// initializer (De()), but leaves the component IIFEs as immediate top-level
+		// code. The components execute before the core's lazy init has run, so
+		// `Prism` is not defined. Fix: inject `import Prism from "prismjs"` into each
+		// component so Rolldown treats the core as a dependency and initializes it first.
+		{
+			name: "fix-prismjs-components",
+			transform(code, id) {
+				if (id.includes("prismjs/components/prism-")) {
+					return { code: `import Prism from "prismjs";\n${code}`, map: null }
+				}
+			},
+		},
 		// For Tauri builds, provide a no-op mock for PWA virtual module
 		...(isTauriBuild
 			? [

@@ -1,7 +1,4 @@
-// IMPORTANT: prism-setup must be imported before any prismjs/components/*
-// modules.  The language components are IIFEs that reference a bare `Prism`
-// global; prism-setup ensures that global exists in production bundles.
-import Prism from "./prism-setup"
+import Prism from "prismjs"
 import "prismjs/components/prism-bash"
 import "prismjs/components/prism-javascript"
 import "prismjs/components/prism-json"
