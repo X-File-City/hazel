@@ -38,6 +38,9 @@ export const ALLOWED_TABLES = [
 	"channels",
 	"channel_members",
 	"channel_sections",
+	"connect_conversations",
+	"connect_conversation_channels",
+	"connect_participants",
 
 	// Message tables
 	"messages",
@@ -147,6 +150,26 @@ export function getWhereClauseForTable(
 			const whereClause = `${deletedAtClause}"${schema.chatSyncMessageLinksTable.channelLinkId.name}" IN (SELECT "id" FROM chat_sync_channel_links WHERE "deletedAt" IS NULL AND "hazelChannelId" IN (SELECT "channelId" FROM channel_access WHERE "userId" = $1))`
 			return Effect.succeed({ whereClause, params: [user.internalUserId] })
 		}
+		case "connect_conversations": {
+			const whereClause = `"${schema.connectConversationsTable.deletedAt.name}" IS NULL AND "${schema.connectConversationsTable.id.name}" IN (SELECT "conversationId" FROM connect_conversation_channels WHERE "deletedAt" IS NULL AND "channelId" IN (SELECT "channelId" FROM channel_access WHERE "userId" = $1))`
+			return Effect.succeed({ whereClause, params: [user.internalUserId] })
+		}
+		case "connect_conversation_channels":
+			return Effect.succeed(
+				buildChannelAccessClause(
+					user.internalUserId,
+					schema.connectConversationChannelsTable.channelId,
+					schema.connectConversationChannelsTable.deletedAt,
+				),
+			)
+		case "connect_participants":
+			return Effect.succeed(
+				buildChannelAccessClause(
+					user.internalUserId,
+					schema.connectParticipantsTable.channelId,
+					schema.connectParticipantsTable.deletedAt,
+				),
+			)
 	}
 
 	return Match.value(table).pipe(
@@ -227,21 +250,17 @@ export function getWhereClauseForTable(
 		// ===========================================
 
 		Match.when("messages", () =>
-			// Messages: only in channels user has access to
-			Effect.succeed(
-				buildChannelAccessClause(
-					user.internalUserId,
-					schema.messagesTable.channelId,
-					schema.messagesTable.deletedAt,
-				),
-			),
+			Effect.succeed({
+				whereClause: `"${schema.messagesTable.deletedAt.name}" IS NULL AND (("${schema.messagesTable.conversationId.name}" IS NULL AND "${schema.messagesTable.channelId.name}" IN (SELECT "channelId" FROM channel_access WHERE "userId" = $1)) OR ("${schema.messagesTable.conversationId.name}" IS NOT NULL AND "${schema.messagesTable.conversationId.name}" IN (SELECT "conversationId" FROM connect_conversation_channels WHERE "deletedAt" IS NULL AND "channelId" IN (SELECT "channelId" FROM channel_access WHERE "userId" = $1))))`,
+				params: [user.internalUserId],
+			}),
 		),
 
 		Match.when("message_reactions", () =>
-			// Message reactions: only in channels user has access to
-			Effect.succeed(
-				buildChannelAccessClause(user.internalUserId, schema.messageReactionsTable.channelId),
-			),
+			Effect.succeed({
+				whereClause: `("${schema.messageReactionsTable.conversationId.name}" IS NULL AND "${schema.messageReactionsTable.channelId.name}" IN (SELECT "channelId" FROM channel_access WHERE "userId" = $1)) OR ("${schema.messageReactionsTable.conversationId.name}" IS NOT NULL AND "${schema.messageReactionsTable.conversationId.name}" IN (SELECT "conversationId" FROM connect_conversation_channels WHERE "deletedAt" IS NULL AND "channelId" IN (SELECT "channelId" FROM channel_access WHERE "userId" = $1)))`,
+				params: [user.internalUserId],
+			}),
 		),
 
 		Match.when("attachments", () =>
@@ -345,8 +364,8 @@ export function getWhereClauseForTable(
 			Effect.fail(
 				new TableAccessError({
 					message: "Table not handled in where clause system",
-					detail: `Missing where clause implementation for table: ${table}`,
-					table,
+					detail: `Missing where clause implementation for table: ${String(table)}`,
+					table: String(table),
 				}),
 			),
 		),

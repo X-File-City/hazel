@@ -9,6 +9,9 @@ import {
 	ChatSyncChannelLink,
 	ChatSyncConnection,
 	ChatSyncMessageLink,
+	ConnectConversation,
+	ConnectConversationChannel,
+	ConnectParticipant,
 	CustomEmoji,
 	IntegrationConnection,
 	Invitation,
@@ -201,6 +204,60 @@ export const channelCollection = createEffectCollection({
 		fetchClient: electricFetchClient,
 	},
 	schema: Channel.Model.json,
+	getKey: (item) => item.id,
+})
+
+export const connectConversationCollection = createEffectCollection({
+	id: "connect_conversations",
+	runtime: runtime,
+	backoff: false,
+	shapeOptions: {
+		url: electricUrl,
+		params: {
+			table: "connect_conversations",
+		},
+		parser: {
+			timestamptz: (date) => new Date(date),
+		},
+		fetchClient: electricFetchClient,
+	},
+	schema: ConnectConversation.Model.json,
+	getKey: (item) => item.id,
+})
+
+export const connectConversationChannelCollection = createEffectCollection({
+	id: "connect_conversation_channels",
+	runtime: runtime,
+	backoff: false,
+	shapeOptions: {
+		url: electricUrl,
+		params: {
+			table: "connect_conversation_channels",
+		},
+		parser: {
+			timestamptz: (date) => new Date(date),
+		},
+		fetchClient: electricFetchClient,
+	},
+	schema: ConnectConversationChannel.Model.json,
+	getKey: (item) => item.id,
+})
+
+export const connectParticipantCollection = createEffectCollection({
+	id: "connect_participants",
+	runtime: runtime,
+	backoff: false,
+	shapeOptions: {
+		url: electricUrl,
+		params: {
+			table: "connect_participants",
+		},
+		parser: {
+			timestamptz: (date) => new Date(date),
+		},
+		fetchClient: electricFetchClient,
+	},
+	schema: ConnectParticipant.Model.json,
 	getKey: (item) => item.id,
 })
 

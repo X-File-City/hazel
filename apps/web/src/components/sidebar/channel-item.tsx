@@ -5,6 +5,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { memo } from "react"
 import { useModal } from "~/atoms/modal-atoms"
 import { ChannelIcon } from "~/components/channel-icon"
+import type { PartnerOrgInfo } from "~/hooks/use-shared-channels"
 import IconDots from "~/components/icons/icon-dots"
 import { IconFolderPlus } from "~/components/icons/icon-folder-plus"
 import IconGear from "~/components/icons/icon-gear"
@@ -34,6 +35,8 @@ interface ChannelItemProps {
 	}>
 	/** Available sections for "move to section" menu */
 	sections?: Array<{ id: ChannelSectionId; name: string }>
+	/** Partner orgs this channel is shared with via Hazel Connect */
+	partnerOrgs?: PartnerOrgInfo[]
 }
 
 export const CHANNEL_DRAG_TYPE = "application/x-hazel-channel"
@@ -44,6 +47,7 @@ export const ChannelItem = memo(function ChannelItem({
 	notificationCount,
 	threads,
 	sections = [],
+	partnerOrgs,
 }: ChannelItemProps) {
 	const deleteChannelModal = useModal("delete-channel")
 	const { can } = usePermission()
@@ -107,7 +111,33 @@ export const ChannelItem = memo(function ChannelItem({
 								className: "bg-sidebar-accent font-medium text-sidebar-accent-fg",
 							}}
 						>
-							<ChannelIcon icon={channel.icon} />
+							<span className="relative shrink-0">
+								<ChannelIcon icon={channel.icon} />
+								{(() => {
+									const firstOrg = partnerOrgs?.[0]
+									if (!firstOrg) return null
+									return (
+										<span className="absolute -right-1 -bottom-0.5 flex items-end -space-x-0.5">
+											{firstOrg.logoUrl ? (
+												<img
+													src={firstOrg.logoUrl}
+													alt=""
+													className="size-2.5 rounded-sm object-cover ring-[1.5px] ring-sidebar"
+												/>
+											) : (
+												<span className="flex size-2.5 items-center justify-center rounded-sm bg-muted text-[6px] font-semibold ring-[1.5px] ring-sidebar">
+													{firstOrg.name[0]}
+												</span>
+											)}
+											{partnerOrgs.length > 1 && (
+												<span className="flex h-2.5 items-center rounded-sm bg-muted px-0.5 text-[7px] font-semibold leading-none ring-[1.5px] ring-sidebar">
+													+{partnerOrgs.length - 1}
+												</span>
+											)}
+										</span>
+									)
+								})()}
+							</span>
 							<SidebarLabel>{channel.name}</SidebarLabel>
 						</SidebarLink>
 						<Menu>

@@ -25,12 +25,14 @@ const isErrorRetryable = (error: unknown): boolean => {
 }
 import { HazelRpcClient } from "~/lib/services/common/rpc-atom-client"
 import { runtime } from "~/lib/services/common/runtime"
+import { getSharedConversationIdForChannel } from "~/lib/connect-shared-channels"
 import { optimisticAction } from "../../../../libs/effect-electric-db-collection/src"
 import {
 	attachmentCollection,
 	channelCollection,
 	channelMemberCollection,
 	channelSectionCollection,
+	connectConversationChannelCollection,
 	customEmojiCollection,
 	messageCollection,
 	messageReactionCollection,
@@ -38,6 +40,9 @@ import {
 	pinnedMessageCollection,
 	userCollection,
 } from "./collections"
+
+const getMountedConversationId = (channelId: ChannelId) =>
+	getSharedConversationIdForChannel(channelId, connectConversationChannelCollection.state.values())
 
 /**
  * Retry schedule for message sending:
@@ -76,6 +81,7 @@ export const sendMessageAction = optimisticAction({
 		messageCollection.insert({
 			id: messageId,
 			channelId: props.channelId,
+			conversationId: getMountedConversationId(props.channelId),
 			authorId: props.authorId,
 			content: props.content,
 			replyToMessageId: props.replyToMessageId || null,
@@ -368,6 +374,7 @@ export const toggleReactionAction = optimisticAction({
 			id: reactionId,
 			messageId: props.messageId,
 			channelId: props.channelId,
+			conversationId: getMountedConversationId(props.channelId),
 			userId: props.userId,
 			emoji: props.emoji,
 			createdAt: new Date(),

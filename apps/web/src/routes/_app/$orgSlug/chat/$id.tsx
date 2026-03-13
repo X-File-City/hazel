@@ -12,6 +12,7 @@ import type { MessageListRef } from "~/components/chat/message-list"
 import { ThreadPanel } from "~/components/chat/thread-panel"
 import { SplitPanel, SplitPanelContent, SplitPanelRoot } from "~/components/ui/split-panel"
 import {
+	connectConversationChannelCollection,
 	messageCollection,
 	messageReactionCollection,
 	pinnedMessageCollection,
@@ -19,6 +20,7 @@ import {
 } from "~/db/collections"
 import { useChatStable, useChatThread } from "~/hooks/use-chat"
 import { useOrganization } from "~/hooks/use-organization"
+import { getSharedConversationIdForChannel } from "~/lib/connect-shared-channels"
 import { ChatProvider } from "~/providers/chat-provider"
 
 const searchSchema = type({
@@ -30,6 +32,10 @@ export const Route = createFileRoute("/_app/$orgSlug/chat/$id")({
 	validateSearch: searchSchema,
 	loader: async ({ params }) => {
 		const channelId = params.id as ChannelId
+		const conversationId = getSharedConversationIdForChannel(
+			channelId,
+			connectConversationChannelCollection.state.values(),
+		)
 
 		// Create infinite query collection for messages
 		// This replaces the simple messageCollection.preload() with pagination support
@@ -43,7 +49,11 @@ export const Route = createFileRoute("/_app/$orgSlug/chat/$id")({
 					.leftJoin({ author: userCollection }, ({ message, author }) =>
 						eq(message.authorId, author.id),
 					)
-					.where(({ message }) => eq(message.channelId, channelId))
+					.where(({ message }) =>
+						conversationId
+							? eq(message.conversationId, conversationId)
+							: eq(message.channelId, channelId),
+					)
 					.select(({ message, pinned, author }) => ({
 						...message,
 						pinnedMessage: pinned,
@@ -60,7 +70,11 @@ export const Route = createFileRoute("/_app/$orgSlug/chat/$id")({
 			query: (q) =>
 				q
 					.from({ reactions: messageReactionCollection })
-					.where(({ reactions }) => eq(reactions.channelId, channelId)),
+					.where(({ reactions }) =>
+						conversationId
+							? eq(reactions.conversationId, conversationId)
+							: eq(reactions.channelId, channelId),
+					),
 		})
 
 		// Preload both in parallel before navigation completes
