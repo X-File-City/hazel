@@ -12,7 +12,7 @@
     {
       "id": "welcome",
       "title": "Welcome to Hazel Chat",
-      "description": "Hazel is a team communication platform built as a Bun monorepo with Turborepo orchestration. The codebase is split into apps/ (deployable services) and packages/ (shared libraries). Let's explore how it all fits together.",
+      "description": "Hazel is a team communication platform built as a Bun monorepo with Turborepo orchestration. The codebase is split into apps/ for deployable services and packages/ for shared libraries. Let's explore how it all fits together.",
       "colorMode": "fileTypes",
       "focusDirectory": "",
       "highlightLayers": [
@@ -289,7 +289,7 @@
       "title": "The Full Picture",
       "description": "That's Hazel Chat — a modern team communication platform built with React 19, Effect-TS, Bun, and PostgreSQL. The monorepo structure keeps apps and packages cleanly separated while shared contracts in packages/domain/ ensure end-to-end type safety. Explore the codebase to see how it all connects.",
       "focusDirectory": "",
-      "colorMode": "git",
+      "colorMode": "fileTypes",
       "resources": [
         {
           "label": "CLAUDE.md — Development Guide",
