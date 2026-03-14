@@ -1,0 +1,301 @@
+{
+  "id": "hazel-onboarding",
+  "title": "Hazel Chat — Codebase Tour",
+  "description": "A guided walkthrough of Hazel Chat's monorepo architecture, covering the frontend, backend, cluster service, and shared packages.",
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Michael Flannery",
+    "createdAt": "2026-03-13",
+    "tags": ["onboarding", "architecture", "monorepo"]
+  },
+  "steps": [
+    {
+      "id": "welcome",
+      "title": "Welcome to Hazel Chat",
+      "description": "Hazel is a team communication platform built as a Bun monorepo with Turborepo orchestration. The codebase is split into apps/ (deployable services) and packages/ (shared libraries). Let's explore how it all fits together.",
+      "colorMode": "fileTypes",
+      "focusDirectory": "",
+      "highlightLayers": [
+        {
+          "id": "apps-layer",
+          "name": "Applications",
+          "color": "#6938EF",
+          "items": [
+            { "path": "apps/web", "type": "directory" },
+            { "path": "apps/backend", "type": "directory" },
+            { "path": "apps/cluster", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "packages-layer",
+          "name": "Shared Packages",
+          "color": "#3b82f6",
+          "items": [
+            { "path": "packages/db", "type": "directory" },
+            { "path": "packages/domain", "type": "directory" },
+            { "path": "packages/schema", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ]
+    },
+    {
+      "id": "frontend-overview",
+      "title": "Frontend — React + Vite + TanStack Router",
+      "description": "The web app is a React 19 SPA with file-based routing (TanStack Router), TailwindCSS v4, and Effect Atom for state management. Routes live alongside components, hooks, and atoms for a feature-oriented layout.",
+      "focusDirectory": "apps/web/src",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "routing-layer",
+          "name": "Routing & Entry",
+          "color": "#ef4444",
+          "items": [
+            { "path": "apps/web/src/routes", "type": "directory" },
+            { "path": "apps/web/src/main.tsx", "type": "file" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "state-layer",
+          "name": "State & Data",
+          "color": "#f59e0b",
+          "items": [
+            { "path": "apps/web/src/atoms", "type": "directory" },
+            { "path": "apps/web/src/db", "type": "directory" },
+            { "path": "apps/web/src/hooks", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "ui-layer",
+          "name": "UI & Components",
+          "color": "#6938EF",
+          "items": [
+            { "path": "apps/web/src/components", "type": "directory" },
+            { "path": "apps/web/src/styles", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ],
+      "interactiveActions": [
+        {
+          "type": "click-file",
+          "description": "Open the app entry point",
+          "target": "apps/web/src/main.tsx"
+        }
+      ]
+    },
+    {
+      "id": "frontend-components",
+      "title": "Frontend — Component Library",
+      "description": "The components/ directory houses 90+ UI primitives (React Aria + Ariakit), chat-specific components (messages, composer, threads), sidebar navigation, modals, and rich embed renderers. The ui/ subdirectory is the design system foundation.",
+      "focusDirectory": "apps/web/src/components",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "chat-components",
+          "name": "Chat UI",
+          "color": "#10b981",
+          "items": [
+            { "path": "apps/web/src/components/chat", "type": "directory" },
+            { "path": "apps/web/src/components/sidebar", "type": "directory" },
+            { "path": "apps/web/src/components/embeds", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "design-system",
+          "name": "Design System",
+          "color": "#6938EF",
+          "items": [
+            { "path": "apps/web/src/components/ui", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ]
+    },
+    {
+      "id": "backend-overview",
+      "title": "Backend — Effect-TS API Server",
+      "description": "The backend runs on Bun with Effect-TS for typed error handling and dependency injection. It follows a layered architecture: routes define HTTP endpoints, services contain business logic, policies enforce authorization, and rpc/ implements typed client-server contracts.",
+      "focusDirectory": "apps/backend/src",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "routes-layer",
+          "name": "HTTP Routes",
+          "color": "#3b82f6",
+          "items": [
+            { "path": "apps/backend/src/routes", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "services-layer",
+          "name": "Business Logic",
+          "color": "#10b981",
+          "items": [
+            { "path": "apps/backend/src/services", "type": "directory" },
+            { "path": "apps/backend/src/rpc", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "policies-layer",
+          "name": "Authorization",
+          "color": "#f59e0b",
+          "items": [
+            { "path": "apps/backend/src/policies", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ],
+      "interactiveActions": [
+        {
+          "type": "click-file",
+          "description": "Open the backend entry point",
+          "target": "apps/backend/src/index.ts"
+        }
+      ]
+    },
+    {
+      "id": "cluster-service",
+      "title": "Cluster — Distributed Workflows & Cron",
+      "description": "The cluster service handles background work using Effect Cluster and Effect Workflow. Workflows process events like message notifications, GitHub webhooks, RSS polling, and AI-powered thread naming. Cron jobs handle periodic tasks like presence cleanup and status expiration.",
+      "focusDirectory": "apps/cluster/src",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "workflows-layer",
+          "name": "Workflows",
+          "color": "#8b5cf6",
+          "items": [
+            { "path": "apps/cluster/src/workflows", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "cron-layer",
+          "name": "Scheduled Jobs",
+          "color": "#f59e0b",
+          "items": [
+            { "path": "apps/cluster/src/cron", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "cluster-services-layer",
+          "name": "Support Services",
+          "color": "#3b82f6",
+          "items": [
+            { "path": "apps/cluster/src/services", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ],
+      "interactiveActions": [
+        {
+          "type": "click-file",
+          "description": "Open the cluster entry point",
+          "target": "apps/cluster/src/index.ts"
+        }
+      ]
+    },
+    {
+      "id": "shared-packages",
+      "title": "Shared Packages — The Glue",
+      "description": "Shared packages enforce type safety across the monorepo. schema/ defines branded ID types, domain/ holds RPC/HTTP/cluster contracts and data models, and db/ provides Drizzle ORM schemas. Other packages handle auth, integrations, and bot frameworks.",
+      "focusDirectory": "packages",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "core-packages",
+          "name": "Core Contracts",
+          "color": "#ef4444",
+          "items": [
+            { "path": "packages/schema", "type": "directory" },
+            { "path": "packages/domain", "type": "directory" },
+            { "path": "packages/db", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "infra-packages",
+          "name": "Infrastructure",
+          "color": "#6366f1",
+          "items": [
+            { "path": "packages/auth", "type": "directory" },
+            { "path": "packages/backend-core", "type": "directory" },
+            { "path": "packages/integrations", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ]
+    },
+    {
+      "id": "supporting-services",
+      "title": "Supporting Services",
+      "description": "Beyond the three core apps, Hazel includes several specialized services: an Electric SQL proxy for real-time sync validation, a bot gateway for third-party bot integrations, a link preview worker, a desktop app (Tauri), and a documentation site.",
+      "focusDirectory": "apps",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "core-apps",
+          "name": "Core Apps",
+          "color": "#6938EF",
+          "items": [
+            { "path": "apps/web", "type": "directory" },
+            { "path": "apps/backend", "type": "directory" },
+            { "path": "apps/cluster", "type": "directory" }
+          ],
+          "opacity": 0.6,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "support-apps",
+          "name": "Supporting Services",
+          "color": "#f59e0b",
+          "items": [
+            { "path": "apps/electric-proxy", "type": "directory" },
+            { "path": "apps/bot-gateway", "type": "directory" },
+            { "path": "apps/link-preview-worker", "type": "directory" },
+            { "path": "apps/desktop", "type": "directory" },
+            { "path": "apps/docs", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ]
+    },
+    {
+      "id": "full-picture",
+      "title": "The Full Picture",
+      "description": "That's Hazel Chat — a modern team communication platform built with React 19, Effect-TS, Bun, and PostgreSQL. The monorepo structure keeps apps and packages cleanly separated while shared contracts in packages/domain/ ensure end-to-end type safety. Explore the codebase to see how it all connects.",
+      "focusDirectory": "",
+      "colorMode": "git",
+      "resources": [
+        {
+          "label": "CLAUDE.md — Development Guide",
+          "url": "CLAUDE.md"
+        }
+      ]
+    }
+  ]
+}
